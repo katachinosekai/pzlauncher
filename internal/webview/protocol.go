@@ -4,44 +4,88 @@ import (
 	"bufio"
 	"encoding/json"
 	"io"
+	"net/url"
 	"regexp"
+	"strings"
 )
 
 const (
-	OpNavigate = "navigate"
-	OpShow     = "show"
-	OpQuit     = "quit"
+	OpSignIn       = "signin"
+	OpCancelSignIn = "cancelsignin"
+	OpSignOut      = "signout"
+	OpState        = "state"
+	OpSubscribe    = "subscribe"
+	OpQuit         = "quit"
 )
 
 const (
-	EvReady       = "ready"
-	EvUnavailable = "unavailable"
-	EvSubscribed  = "subscribed"
-	EvURL         = "url"
-	EvExternal    = "external"
+	ModeWindow = "window"
+	ModeQR     = "qr"
 )
+
+const (
+	EvReady        = "ready"
+	EvUnavailable  = "unavailable"
+	EvExternal     = "external"
+	EvSession      = "session"
+	EvQR           = "qr"
+	EvSignInClosed = "signinclosed"
+	EvSubResult    = "subresult"
+)
+
+const (
+	ResultDone        = "done"
+	ResultAlready     = "already"
+	ResultNotSignedIn = "not_signed_in"
+	ResultFailed      = "failed"
+)
+
+const (
+	StatusURL = "https://steamcommunity.com/app/108600/workshop/"
+	LoginURL  = "https://steamcommunity.com/login/home/?goto=%2Fapp%2F108600%2Fworkshop%2F"
+)
+
+func ItemURL(id string) string {
+	return "https://steamcommunity.com/sharedfiles/filedetails/?id=" + url.QueryEscape(id)
+}
 
 type Command struct {
-	Op  string `json:"op"`
-	URL string `json:"url,omitempty"`
+	Op          string `json:"op"`
+	Mode        string `json:"mode,omitempty"`
+	ID          string `json:"id,omitempty"`
+	Req         int    `json:"req,omitempty"`
+	Unsubscribe bool   `json:"unsubscribe,omitempty"`
+	Deps        bool   `json:"deps,omitempty"`
 }
 
 type Event struct {
-	Event      string `json:"event"`
-	URL        string `json:"url,omitempty"`
-	ID         string `json:"id,omitempty"`
-	Subscribed bool   `json:"subscribed,omitempty"`
-	Error      string `json:"error,omitempty"`
+	Event     string `json:"event"`
+	URL       string `json:"url,omitempty"`
+	ID        string `json:"id,omitempty"`
+	Req       int    `json:"req,omitempty"`
+	Result    string `json:"result,omitempty"`
+	SignedIn  bool   `json:"signed_in,omitempty"`
+	Name      string `json:"name,omitempty"`
+	Image     string `json:"image,omitempty"`
+	Challenge string `json:"challenge,omitempty"`
+	Error     string `json:"error,omitempty"`
 }
 
-const maxLine = 64 << 10
+const maxLine = 1 << 20
+
+var (
+	digits      = regexp.MustCompile(`^[0-9]{1,20}$`)
+	challengeRe = regexp.MustCompile(`^https://s\.team/q/[0-9]{1,10}/[0-9]{1,30}$`)
+)
 
 func (c Command) Valid() bool {
 	switch c.Op {
-	case OpShow, OpQuit:
+	case OpCancelSignIn, OpSignOut, OpState, OpQuit:
 		return true
-	case OpNavigate:
-		return Allowed(c.URL)
+	case OpSignIn:
+		return c.Mode == ModeWindow || c.Mode == ModeQR
+	case OpSubscribe:
+		return digits.MatchString(c.ID)
 	}
 	return false
 }
@@ -88,24 +132,114 @@ func ReadEvents(r io.Reader, fn func(Event)) error {
 	})
 }
 
-var digits = regexp.MustCompile(`^[0-9]{1,20}$`)
+const (
+	MsgPage   = "page"
+	MsgQR     = "qr"
+	MsgResult = "result"
+)
 
-func ParseScriptMessage(s string) (Event, bool) {
-	var m struct {
-		ID         string `json:"id"`
-		Subscribed bool   `json:"subscribed"`
-	}
-	if len(s) > 1024 || json.Unmarshal([]byte(s), &m) != nil || !digits.MatchString(m.ID) {
-		return Event{}, false
-	}
-	return Event{Event: EvSubscribed, ID: m.ID, Subscribed: m.Subscribed}, true
+type ScriptMsg struct {
+	Kind      string `json:"kind"`
+	URL       string `json:"url"`
+	SignedIn  bool   `json:"signedIn"`
+	Name      string `json:"name"`
+	ItemID    string `json:"item"`
+	Image     string `json:"image"`
+	Challenge string `json:"challenge"`
+	ID        string `json:"id"`
+	Result    string `json:"result"`
+	Error     string `json:"error"`
 }
 
-func WatchScript(post string) string {
-	return `(function(){if(window.__pzlWatch)return;window.__pzlWatch=1;` +
+const maxQRImage = 512 << 10
+
+func ParseScriptMessage(s string) (ScriptMsg, bool) {
+	var m ScriptMsg
+	if len(s) > maxQRImage+4096 || json.Unmarshal([]byte(s), &m) != nil {
+		return ScriptMsg{}, false
+	}
+	m.Name = cleanText(m.Name, 64)
+	m.Error = cleanText(m.Error, 300)
+	switch m.Kind {
+	case MsgPage:
+		return m, m.ItemID == "" || digits.MatchString(m.ItemID)
+	case MsgQR:
+		if !challengeRe.MatchString(m.Challenge) {
+			m.Challenge = ""
+		}
+		if !strings.HasPrefix(m.Image, "data:image/png;base64,") && !strings.HasPrefix(m.Image, "data:image/gif;base64,") && !strings.HasPrefix(m.Image, "data:image/jpeg;base64,") {
+			m.Image = ""
+		}
+		return m, m.Image != "" || m.Challenge != ""
+	case MsgResult:
+		switch m.Result {
+		case ResultDone, ResultAlready, ResultNotSignedIn, ResultFailed:
+			return m, digits.MatchString(m.ID)
+		}
+	}
+	return ScriptMsg{}, false
+}
+
+func cleanText(s string, n int) string {
+	s = strings.Join(strings.Fields(s), " ")
+	if r := []rune(s); len(r) > n {
+		s = string(r[:n])
+	}
+	return s
+}
+
+func PageScript(post string) string {
+	return `(function(){if(window.__pzl)return;window.__pzl=1;` +
+		`function post(o){try{` + post + `(JSON.stringify(o));}catch(e){}}` +
+		`var login=/^\/login/.test(location.pathname);var chal='';` +
+		`function scan(s){var m=/https:\/\/s\.team\/q\/[0-9]+\/[0-9]+/.exec(s);if(m)chal=m[0];}` +
+		`function bytes(buf){try{var a=new Uint8Array(buf);var s='';for(var i=0;i<a.length&&i<65536;i++)s+=String.fromCharCode(a[i]);scan(s);}catch(e){}}` +
+		`if(login){` +
+		`var of=window.fetch;if(of){window.fetch=function(){return of.apply(this,arguments).then(function(r){try{r.clone().arrayBuffer().then(bytes);}catch(e){}return r;});};}` +
+		`var oo=XMLHttpRequest.prototype.open;XMLHttpRequest.prototype.open=function(){this.addEventListener('load',function(){try{if(this.responseType==='arraybuffer')bytes(this.response);else if(this.responseType===''||this.responseType==='text')scan(this.responseText);}catch(e){}});return oo.apply(this,arguments);};` +
+		`}` +
+		QRFinderJS +
+		`function run(){` +
+		`var sid=window.g_steamID;var signed=typeof sid==='string'&&sid.length>0;` +
+		`var n=document.querySelector('#account_pulldown');` +
 		`var m=/[?&]id=(\d+)/.exec(location.search);` +
-		`if(!m||!/\/(sharedfiles|workshop)\/filedetails/.test(location.pathname))return;` +
-		`var last=null;function check(){var b=document.getElementById('SubscribeItemBtn');if(!b)return;` +
-		`var s=b.classList.contains('toggled');if(s!==last){last=s;try{` + post + `(JSON.stringify({id:m[1],subscribed:s}));}catch(e){}}}` +
-		`setInterval(check,1000);})();`
+		`var item=(m&&/\/(sharedfiles|workshop)\/filedetails/.test(location.pathname))?m[1]:'';` +
+		`post({kind:'page',url:location.href,signedIn:signed,name:n?n.textContent:'',item:item});` +
+		`if(login){var last='';setInterval(function(){var u=findQR();var k=u+'|'+chal;if((u||chal)&&k!==last){last=k;post({kind:'qr',image:u,challenge:chal});}},1000);}` +
+		`}` +
+		`if(document.readyState==='loading'){document.addEventListener('DOMContentLoaded',run);}else{run();}` +
+		`})();`
+}
+
+const QRFinderJS = `function fiberChal(el){try{for(var k in el){if(k.indexOf('__reactFiber')===0){var f=el[k];for(var d=0;f&&d<20;d++,f=f.return){var p=f.memoizedProps;if(p){for(var q in p){var v=p[q];if(typeof v==='string'){var m=/https:\/\/s\.team\/q\/[0-9]+\/[0-9]+/.exec(v);if(m)return m[0];}}}}}}}catch(e){}return '';}` +
+	`function findQR(){` +
+	`var ims=document.querySelectorAll('img');for(var j=0;j<ims.length;j++){var im=ims[j];` +
+	`if(!im.complete||im.naturalWidth<21||im.naturalWidth>1024||im.naturalWidth!==im.naturalHeight)continue;` +
+	`if(!/^data:image\/(png|gif|jpeg);base64,/.test(im.src))continue;` +
+	`var c=fiberChal(im);if(c)chal=c;return im.src;}` +
+	`var cs=document.querySelectorAll('canvas');for(var i=0;i<cs.length;i++){var cv=cs[i];` +
+	`if(cv.width>=21&&cv.width===cv.height&&cv.getBoundingClientRect().width>0){var c2=fiberChal(cv);if(c2)chal=c2;try{return cv.toDataURL('image/png');}catch(e){return '';}}}` +
+	`return '';}`
+
+func SubscribeScript(id string, unsubscribe, deps bool, post string) string {
+	b, _ := json.Marshal(struct {
+		ID   string `json:"id"`
+		Want bool   `json:"want"`
+		Deps bool   `json:"deps"`
+	}{id, !unsubscribe, deps})
+	return `(function(a){` +
+		`function post(o){o.kind='result';o.id=a.id;try{` + post + `(JSON.stringify(o));}catch(e){}}` +
+		`var sid=window.g_steamID;if(!(typeof sid==='string'&&sid.length>0)){post({result:'not_signed_in'});return;}` +
+		`var b=document.getElementById('SubscribeItemBtn');if(!b){post({result:'failed',error:'Steam shows no Subscribe button for this item'});return;}` +
+		`function on(){return b.classList.contains('toggled');}` +
+		`if(on()===a.want){post({result:'already'});return;}` +
+		`b.click();var t=0;var iv=setInterval(function(){t++;` +
+		`if(on()===a.want){clearInterval(iv);post({result:'done'});return;}` +
+		`var d=document.querySelector('.newmodal');` +
+		`if(d&&!d.__pzl){d.__pzl=1;var all=d.querySelector('.btn_blue_steamui');var ok=d.querySelector('.btn_green_steamui');` +
+		`if(all&&ok){(a.deps?all:ok).click();}else{var c=d.querySelector('.newmodal_content');clearInterval(iv);` +
+		`post({result:'failed',error:c?c.textContent:'Steam showed an error'});if(ok)ok.click();return;}}` +
+		`if(t>=50){clearInterval(iv);post({result:'failed',error:'Steam did not confirm the change'});}` +
+		`},300);` +
+		`})(` + string(b) + `);`
 }

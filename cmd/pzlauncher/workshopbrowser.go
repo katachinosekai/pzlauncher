@@ -6,10 +6,9 @@ import (
 	"image"
 	"image/color"
 	"os"
+	"slices"
 	"sort"
 	"strings"
-	"sync"
-	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
@@ -25,7 +24,7 @@ import (
 
 func init() {
 	if len(os.Args) > 1 && os.Args[1] == webview.HelperFlag {
-		os.Exit(webview.RunHelper(webview.Options{Open: install.DefaultSystem().OpenURL}))
+		os.Exit(webview.RunHelper(webview.Options{Open: install.DefaultSystem().OpenURL, Ephemeral: slices.Contains(os.Args[2:], webview.EphemeralFlag)}))
 	}
 	registerTab(25, "Workshop", (*ui).workshopTab)
 }
@@ -53,7 +52,7 @@ var workshopDeps = wsDeps{
 	external: func(u string) error { return install.DefaultSystem().OpenURL(u) },
 }
 
-const wsHint = "Subscribe on Steam's own Workshop page in the built-in browser. Sign in there if Steam asks: the login is Steam's page, the launcher never sees your password. Steam downloads new subscriptions in the Steam client, and downloads may stall while the game is running."
+const wsHint = "Subscribe and Unsubscribe run in the background on Steam's own Workshop page in a hidden built-in browser. Sign in once with Steam's QR code or login page; the launcher never sees your password. Steam downloads new subscriptions in the Steam client, and downloads may stall while the game is running."
 
 type wsItem struct {
 	ID         string
@@ -69,47 +68,31 @@ type wsBrowser struct {
 	deps   wsDeps
 	ctl    *webview.Controller
 	thumbs *thumbCache
-	engine *widget.Label
+	status *widget.Label
+	sess   *wsSession
 
-	subMu     sync.Mutex
-	onSubbed  []func(id string)
-	subbedIDs map[string]bool
+	busy     map[string]bool
+	subState map[string]bool
+	watchers []func()
 }
 
 func (u *ui) workshopTab() fyne.CanvasObject {
-	b := &wsBrowser{u: u, deps: workshopDeps, subbedIDs: map[string]bool{}}
+	b := &wsBrowser{u: u, deps: workshopDeps, busy: map[string]bool{}, subState: map[string]bool{}}
 	b.thumbs = newThumbCache(b.deps.thumb)
-	b.engine = widget.NewLabel("Built-in browser: opens when you pick a mod.")
-	b.engine.Importance = widget.LowImportance
+	b.status = widget.NewLabel("")
+	b.status.Importance = widget.LowImportance
+	b.status.Truncation = fyne.TextTruncateEllipsis
 	b.ctl = &webview.Controller{
-		OpenExternal: b.deps.external,
-		OnFallback: func(err error) {
-			fyne.Do(func() {
-				b.engine.SetText("Built-in browser unavailable: pages open in your default web browser.")
-				msg := "The built-in browser could not start, so Steam pages open in your default web browser instead."
-				if err != nil {
-					msg += "\n\nReason: " + err.Error()
-				}
-				dialog.ShowInformation("Opening pages in your web browser", msg, u.win)
-			})
-		},
-		OnEvent: func(e webview.Event) {
-			switch e.Event {
-			case webview.EvURL:
-				fyne.Do(func() { b.engine.SetText("Built-in browser: " + e.URL) })
-			case webview.EvSubscribed:
-				if e.Subscribed {
-					b.markSubscribed(e.ID)
-				}
-			}
-		},
+		OnFallback: func(err error) { fyne.Do(func() { b.sess.onFallback(err) }) },
+		OnEvent:    func(e webview.Event) { fyne.Do(func() { b.sess.onEvent(e) }) },
 	}
-	signIn := widget.NewButtonWithIcon("Sign in to Steam", theme.LoginIcon(), func() { b.open(workshop.LoginURL) })
+	b.sess = newWSSession(b)
+	u.closers = append(u.closers, b.ctl.Close)
+	u.onTab("Workshop", b.sess.ensure)
 	hint := widget.NewLabel(wsHint)
 	hint.Wrapping = fyne.TextWrapWord
 	hint.Importance = widget.LowImportance
-	b.engine.Truncation = fyne.TextTruncateEllipsis
-	top := container.NewVBox(container.NewBorder(nil, nil, nil, signIn, b.engine), hint)
+	top := container.NewVBox(container.NewBorder(nil, nil, nil, container.NewHBox(b.sess.signInBtn, b.sess.signOutBtn), b.sess.label), b.status, hint)
 
 	tabs := container.NewAppTabs(
 		container.NewTabItem("Search", b.searchTab()),
@@ -135,28 +118,75 @@ func (u *ui) workshopTab() fyne.CanvasObject {
 	return container.NewBorder(top, nil, nil, nil, tabs)
 }
 
-func (b *wsBrowser) open(u string) {
-	go func() {
-		if err := b.ctl.Open(u); err != nil {
-			fyne.Do(func() { dialog.ShowError(err, b.u.win) })
-		}
-	}()
-}
-
-func (b *wsBrowser) markSubscribed(id string) {
-	b.subMu.Lock()
-	b.subbedIDs[id] = true
-	cbs := append([]func(string){}, b.onSubbed...)
-	b.subMu.Unlock()
-	for _, cb := range cbs {
-		cb(id)
+func (b *wsBrowser) openExternal(u string) {
+	if err := b.deps.external(u); err != nil {
+		dialog.ShowError(err, b.u.win)
 	}
 }
 
-func (b *wsBrowser) watchSubscribed(cb func(id string)) {
-	b.subMu.Lock()
-	b.onSubbed = append(b.onSubbed, cb)
-	b.subMu.Unlock()
+func (b *wsBrowser) subscribed(it wsItem) bool {
+	if v, ok := b.subState[it.ID]; ok {
+		return v
+	}
+	return it.Subscribed
+}
+
+func (b *wsBrowser) notify() {
+	for _, w := range b.watchers {
+		w()
+	}
+}
+
+func (b *wsBrowser) watch(fn func()) { b.watchers = append(b.watchers, fn) }
+
+func (b *wsBrowser) setSub(id string, unsub bool, cb func(webview.Event)) {
+	b.busy[id] = true
+	b.notify()
+	b.sess.subscribe(id, unsub, func(e webview.Event) {
+		delete(b.busy, id)
+		switch e.Result {
+		case webview.ResultDone, webview.ResultAlready:
+			b.subState[id] = !unsub
+		}
+		b.notify()
+		cb(e)
+	})
+}
+
+func (b *wsBrowser) toggle(it wsItem) {
+	unsub := b.subscribed(it)
+	title := it.Title
+	if title == "" {
+		title = "item " + it.ID
+	}
+	verb := "Subscribing to"
+	if unsub {
+		verb = "Unsubscribing from"
+	}
+	b.status.SetText(verb + " " + title + "...")
+	b.setSub(it.ID, unsub, func(e webview.Event) {
+		switch e.Result {
+		case webview.ResultDone:
+			if unsub {
+				b.status.SetText("Unsubscribed from " + title + ".")
+			} else {
+				b.status.SetText("Subscribed to " + title + ". Steam downloads it in the Steam client.")
+			}
+		case webview.ResultAlready:
+			if unsub {
+				b.status.SetText(title + " was not subscribed.")
+			} else {
+				b.status.SetText(title + " was already subscribed.")
+			}
+		case resOpened:
+			b.status.SetText("Opened " + title + " in your default browser: press Subscribe there.")
+		case webview.ResultNotSignedIn:
+			b.status.SetText("Not signed in to Steam (" + e.Error + "): nothing changed for " + title + ".")
+		default:
+			b.status.SetText("Could not change " + title + ".")
+			dialog.ShowError(fmt.Errorf("%s %s failed: %s", verb, title, e.Error), b.u.win)
+		}
+	})
 }
 
 type wsRow struct {
@@ -165,6 +195,7 @@ type wsRow struct {
 	title   *widget.Label
 	info    *widget.Label
 	btn     *widget.Button
+	ext     *widget.Button
 	preview string
 	content fyne.CanvasObject
 }
@@ -183,8 +214,9 @@ func newWSRow() *wsRow {
 	r.info.Truncation = fyne.TextTruncateEllipsis
 	r.info.Importance = widget.LowImportance
 	r.btn = widget.NewButton("Subscribe", nil)
+	r.ext = widget.NewButtonWithIcon("", theme.ComputerIcon(), nil)
 	text := container.New(&tightVBox{}, r.title, r.info)
-	r.content = container.NewBorder(nil, nil, container.NewStack(bg, r.img), container.NewCenter(r.btn), text)
+	r.content = container.NewBorder(nil, nil, container.NewStack(bg, r.img), container.NewCenter(container.NewHBox(r.btn, r.ext)), text)
 	r.ExtendBaseWidget(r)
 	return r
 }
@@ -234,19 +266,24 @@ func (b *wsBrowser) itemList(items *[]wsItem) *widget.List {
 				info = strings.ToUpper(it.State) + "  ·  " + info
 			}
 			r.info.SetText(info)
-			b.subMu.Lock()
-			subbed := it.Subscribed || b.subbedIDs[it.ID]
-			b.subMu.Unlock()
-			if subbed {
-				r.btn.SetText("Open page")
+			switch {
+			case b.busy[it.ID]:
+				r.btn.SetText("Working...")
 				r.btn.Importance = widget.MediumImportance
-			} else {
+				r.btn.Disable()
+			case b.subscribed(it):
+				r.btn.SetText("Unsubscribe")
+				r.btn.Importance = widget.MediumImportance
+				r.btn.Enable()
+			default:
 				r.btn.SetText("Subscribe")
 				r.btn.Importance = widget.HighImportance
+				r.btn.Enable()
 			}
 			r.btn.Refresh()
+			r.btn.OnTapped = func() { b.toggle(it) }
 			id := it.ID
-			r.btn.OnTapped = func() { b.open(workshop.ItemURL(id)) }
+			r.ext.OnTapped = func() { b.openExternal(workshop.ItemURL(id)) }
 			r.preview = it.Preview
 			preview := it.Preview
 			im := b.thumbs.Get(b.u.ctx, preview, func(im image.Image) {
@@ -261,12 +298,8 @@ func (b *wsBrowser) itemList(items *[]wsItem) *widget.List {
 			r.img.Refresh()
 		},
 	)
-	list.OnSelected = func(i widget.ListItemID) {
-		if i < len(*items) {
-			b.open(workshop.ItemURL((*items)[i].ID))
-		}
-		list.UnselectAll()
-	}
+	list.OnSelected = func(widget.ListItemID) { list.UnselectAll() }
+	b.watch(list.Refresh)
 	return list
 }
 
@@ -346,7 +379,7 @@ func (b *wsBrowser) browseView(controls fyne.CanvasObject, query func() workshop
 				}
 				more.Enable()
 				if err != nil {
-					status.SetText("Could not load the list: " + err.Error() + " (use \"Open in browser\")")
+					status.SetText("Could not load the list: " + err.Error() + " (use \"Open in default browser\")")
 					if reset {
 						items = nil
 						list.Refresh()
@@ -372,9 +405,8 @@ func (b *wsBrowser) browseView(controls fyne.CanvasObject, query func() workshop
 		}()
 	}
 	more.OnTapped = func() { load(false) }
-	openBrowse := widget.NewButtonWithIcon("Open in browser", theme.ComputerIcon(), func() {
-		q := query()
-		b.open(workshop.BrowseURL("", q))
+	openBrowse := widget.NewButtonWithIcon("Open in default browser", theme.ComputerIcon(), func() {
+		b.openExternal(workshop.BrowseURL("", query()))
 	})
 	top := container.NewVBox(container.NewBorder(nil, nil, nil, openBrowse, controls), status)
 	return container.NewBorder(top, container.NewCenter(more), nil, nil, list), func() { load(true) }
@@ -508,81 +540,65 @@ func (b *wsBrowser) collectionTab() (fyne.CanvasObject, func()) {
 	progress.Wrapping = fyne.TextWrapWord
 
 	var missing []wsItem
-	queue := []wsItem{}
-	pos := -1
-	var next, stop, subMissing *widget.Button
-	showStep := func() {
-		if pos < 0 || pos >= len(queue) {
-			if pos >= len(queue) && len(queue) > 0 {
-				progress.SetText("Done: every missing item's page was opened. Press Refresh after Steam has downloaded them.")
-			} else {
-				progress.SetText("")
-			}
-			pos = -1
-			next.Hide()
+	var q *webview.SubQueue
+	stopReq := false
+	var stop, subMissing *widget.Button
+	var step func()
+	step = func() {
+		if q == nil {
+			return
+		}
+		if stopReq && !q.Finished() {
+			q.Stop("stopped by you")
+		}
+		it, ok := q.Current()
+		if !ok {
+			progress.SetText(q.Summary() + " Press Refresh after Steam has downloaded them.")
+			q = nil
 			stop.Hide()
 			subMissing.Show()
 			return
 		}
-		it := queue[pos]
-		title := it.Title
-		if title == "" {
-			title = it.ID
-		}
-		progress.SetText(fmt.Sprintf("Missing item %d of %d: %s. Press Subscribe on the Steam page; the next one opens by itself once Steam shows it subscribed (or press Next missing).", pos+1, len(queue), title))
-		next.Show()
-		stop.Show()
-		subMissing.Hide()
-		b.open(workshop.ItemURL(it.ID))
-	}
-	var advanceTimer *time.Timer
-	b.watchSubscribed(func(id string) {
-		fyne.Do(func() {
-			list.Refresh()
-			if pos >= 0 && pos < len(queue) && queue[pos].ID == id {
-				if advanceTimer != nil {
-					advanceTimer.Stop()
-				}
-				want := pos
-				advanceTimer = time.AfterFunc(1500*time.Millisecond, func() {
-					fyne.Do(func() {
-						if pos == want {
-							pos++
-							showStep()
-						}
-					})
-				})
+		progress.SetText(q.Progress())
+		b.setSub(it.ID, false, func(e webview.Event) {
+			if q == nil {
+				return
 			}
+			if e.Result == resOpened {
+				q.Record(webview.ResultFailed, "opened in your default browser")
+				q.Stop("built-in browser unavailable: press Subscribe on the page that opened, then run this again")
+			} else {
+				q.Record(e.Result, e.Error)
+			}
+			step()
 		})
-	})
-	next = widget.NewButtonWithIcon("Next missing", theme.NavigateNextIcon(), func() {
-		pos++
-		showStep()
-	})
-	stop = widget.NewButton("Stop", func() {
-		pos = len(queue)
-		showStep()
-		progress.SetText("")
+	}
+	stop = widget.NewButtonWithIcon("Stop", theme.MediaStopIcon(), func() {
+		stopReq = true
+		stop.Disable()
+		if q != nil {
+			progress.SetText(q.Progress() + " (stopping after this one)")
+		}
 	})
 	subMissing = widget.NewButtonWithIcon("Subscribe to missing", theme.DownloadIcon(), func() {
-		queue = queue[:0]
+		var todo []webview.QueueItem
 		for _, m := range missing {
-			b.subMu.Lock()
-			done := b.subbedIDs[m.ID]
-			b.subMu.Unlock()
-			if !m.Subscribed && !done {
-				queue = append(queue, m)
+			if !b.subscribed(m) {
+				todo = append(todo, webview.QueueItem{ID: m.ID, Title: m.Title})
 			}
 		}
-		if len(queue) == 0 {
+		if len(todo) == 0 {
 			progress.SetText("Nothing to subscribe: every missing item is already subscribed and waits for Steam to download it.")
 			return
 		}
-		pos = 0
-		showStep()
+		q = webview.NewSubQueue(todo)
+		stopReq = false
+		stop.Enable()
+		stop.Show()
+		subMissing.Hide()
+		step()
 	})
 	subMissing.Disable()
-	next.Hide()
 	stop.Hide()
 
 	var refresh *widget.Button
@@ -674,8 +690,8 @@ func (b *wsBrowser) collectionTab() (fyne.CanvasObject, func()) {
 		}()
 	}
 	refresh = widget.NewButtonWithIcon("Refresh", theme.ViewRefreshIcon(), load)
-	openCol := widget.NewButtonWithIcon("Open collection page", theme.ComputerIcon(), func() { b.open(workshop.ItemURL(cid())) })
-	actions := container.NewHBox(subMissing, next, stop, openCol)
+	openCol := widget.NewButtonWithIcon("Open in default browser", theme.ComputerIcon(), func() { b.openExternal(workshop.ItemURL(cid())) })
+	actions := container.NewHBox(subMissing, stop, openCol)
 	top := container.NewVBox(
 		container.NewBorder(nil, nil, widget.NewLabel("Collection id"), refresh, colEntry),
 		summary,

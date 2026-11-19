@@ -37,8 +37,10 @@ type gtkAPI struct {
 	gtkEntryGetText       func(e uintptr) string
 	gtkEntrySetIcon       func(e uintptr, pos int32, name string)
 	gtkEntrySetIconTip    func(e uintptr, pos int32, tip string)
+	gtkWidgetHide         func(w uintptr)
 
 	wkDataManagerNew     func(k1, v1, k2, v2 string, end uintptr) uintptr
+	wkDataManagerNewEph  func() uintptr
 	wkContextNewWithDM   func(dm uintptr) uintptr
 	wkDMCookieManager    func(dm uintptr) uintptr
 	wkCookieSetStorage   func(cm uintptr, path string, kind int32)
@@ -64,6 +66,9 @@ type gtkAPI struct {
 	wkNavActionGesture   func(a uintptr) int32
 	wkURIRequestGetURI   func(r uintptr) string
 	wkPolicyIgnore       func(d uintptr)
+	wkEvalJS             func(v uintptr, js string, length int, world, source, cancel, cb, data uintptr)
+	wkRunJS              func(v uintptr, js string, cancel, cb, data uintptr)
+	wkDMClear            func(dm uintptr, types uint32, span int64, cancel, cb, data uintptr)
 }
 
 func openLib(names ...string) (uintptr, error) {
@@ -128,6 +133,14 @@ func loadGTK() (api *gtkAPI, err error) {
 	reg(&a.gtkEntryGetText, gtk, "gtk_entry_get_text")
 	reg(&a.gtkEntrySetIcon, gtk, "gtk_entry_set_icon_from_icon_name")
 	reg(&a.gtkEntrySetIconTip, gtk, "gtk_entry_set_icon_tooltip_text")
+	reg(&a.gtkWidgetHide, gtk, "gtk_widget_hide")
+	reg(&a.wkDMClear, wk, "webkit_website_data_manager_clear")
+	reg(&a.wkDataManagerNewEph, wk, "webkit_website_data_manager_new_ephemeral")
+	if _, err := purego.Dlsym(wk, "webkit_web_view_evaluate_javascript"); err == nil {
+		reg(&a.wkEvalJS, wk, "webkit_web_view_evaluate_javascript")
+	} else {
+		reg(&a.wkRunJS, wk, "webkit_web_view_run_javascript")
+	}
 	reg(&a.wkDataManagerNew, wk, "webkit_website_data_manager_new")
 	reg(&a.wkContextNewWithDM, wk, "webkit_web_context_new_with_website_data_manager")
 	reg(&a.wkDMCookieManager, wk, "webkit_website_data_manager_get_cookie_manager")
@@ -161,20 +174,42 @@ type gtkEngine struct {
 	api                         *gtkAPI
 	h                           *Helper
 	win, view, entry, back, fwd uintptr
+	dm                          uintptr
 	mu                          sync.Mutex
-	queue                       []Command
-	idleCB                      uintptr
+	queue                       []func()
+	idleCB, clearCB             uintptr
+	clearDone                   func()
 }
 
 var linuxEngine *gtkEngine
 
-func (e *gtkEngine) Navigate(url string) { e.api.wkViewLoadURI(e.view, url) }
-func (e *gtkEngine) Present()            { e.api.gtkWindowPresent(e.win) }
-func (e *gtkEngine) Quit()               { e.api.gtkMainQuit() }
+const wkDataCookiesAndStorage = 1<<8 | 1<<3 | 1<<4 | 1<<6 | 1<<0 | 1<<1
 
-func (e *gtkEngine) post(c Command) {
+func (e *gtkEngine) Load(url string) { e.api.wkViewLoadURI(e.view, url) }
+func (e *gtkEngine) Quit()           { e.api.gtkMainQuit() }
+func (e *gtkEngine) Hide()           { e.api.gtkWidgetHide(e.win) }
+
+func (e *gtkEngine) Show() {
+	e.api.gtkWidgetShowAll(e.win)
+	e.api.gtkWindowPresent(e.win)
+}
+
+func (e *gtkEngine) Eval(js string) {
+	if e.api.wkEvalJS != nil {
+		e.api.wkEvalJS(e.view, js, -1, 0, 0, 0, 0, 0)
+		return
+	}
+	e.api.wkRunJS(e.view, js, 0, 0, 0)
+}
+
+func (e *gtkEngine) ClearData(done func()) {
+	e.clearDone = done
+	e.api.wkDMClear(e.dm, wkDataCookiesAndStorage, 0, 0, e.clearCB, 0)
+}
+
+func (e *gtkEngine) Post(fn func()) {
 	e.mu.Lock()
-	e.queue = append(e.queue, c)
+	e.queue = append(e.queue, fn)
 	e.mu.Unlock()
 	e.api.gIdleAdd(e.idleCB, 0)
 }
@@ -195,9 +230,6 @@ func (e *gtkEngine) refresh() {
 	}
 	a.gtkEntrySetIcon(e.entry, 0, icon)
 	a.gtkEntrySetIconTip(e.entry, 0, tip)
-	if uri != "" {
-		e.h.URLChanged(uri)
-	}
 }
 
 func runEngine(h *Helper, o Options) error {
@@ -217,10 +249,20 @@ func runEngine(h *Helper, o Options) error {
 		q := e.queue
 		e.queue = nil
 		e.mu.Unlock()
-		for _, c := range q {
-			h.Apply(e, c)
+		for _, fn := range q {
+			fn()
 		}
 		return 0
+	})
+	e.clearCB = purego.NewCallback(func(src, res, data uintptr) {
+		if d := e.clearDone; d != nil {
+			e.clearDone = nil
+			d()
+		}
+	})
+	deleteEv := purego.NewCallback(func(w, ev, data uintptr) uintptr {
+		h.WindowClosed()
+		return 1
 	})
 	clicked := purego.NewCallback(func(w, data uintptr) {
 		switch data {
@@ -271,7 +313,7 @@ func runEngine(h *Helper, o Options) error {
 			if t == "" {
 				t = "Steam"
 			}
-			a.gtkWindowSetTitle(e.win, t+" - PZ Launcher browser")
+			a.gtkWindowSetTitle(e.win, t+" - PZ Launcher")
 			return
 		}
 		e.refresh()
@@ -283,12 +325,20 @@ func runEngine(h *Helper, o Options) error {
 		}
 	})
 
-	dm := a.wkDataManagerNew("base-data-directory", o.DataDir, "base-cache-directory", o.CacheDir, 0)
+	var dm uintptr
+	if o.Ephemeral {
+		dm = a.wkDataManagerNewEph()
+	} else {
+		dm = a.wkDataManagerNew("base-data-directory", o.DataDir, "base-cache-directory", o.CacheDir, 0)
+	}
 	if dm == 0 {
 		return errors.New("WebKit data manager could not be created")
 	}
+	e.dm = dm
 	cm := a.wkDMCookieManager(dm)
-	a.wkCookieSetStorage(cm, filepath.Join(o.DataDir, "cookies.sqlite"), 1)
+	if !o.Ephemeral {
+		a.wkCookieSetStorage(cm, filepath.Join(o.DataDir, "cookies.sqlite"), 1)
+	}
 	a.wkCookieSetPolicy(cm, 0)
 	ctx := a.wkContextNewWithDM(dm)
 	e.view = a.wkViewNewWithContext(ctx)
@@ -298,12 +348,13 @@ func runEngine(h *Helper, o Options) error {
 	ucm := a.wkViewGetUCM(e.view)
 	if a.wkUCMRegisterHandler(ucm, "pzl") != 0 {
 		a.gSignalConnectData(ucm, "script-message-received::pzl", scriptMsg, 0, 0, 0)
-		a.wkUCMAddScript(ucm, a.wkUserScriptNew(WatchScript("window.webkit.messageHandlers.pzl.postMessage"), 1, 1, 0, 0))
+		h.PostJS = "window.webkit.messageHandlers.pzl.postMessage"
+		a.wkUCMAddScript(ucm, a.wkUserScriptNew(PageScript(h.PostJS), 1, 0, 0, 0))
 	}
 
 	e.win = a.gtkWindowNew(0)
-	a.gtkWindowSetTitle(e.win, "Steam - PZ Launcher browser")
-	a.gtkWindowSetDefSize(e.win, 1150, 850)
+	a.gtkWindowSetTitle(e.win, "Sign in to Steam - PZ Launcher")
+	a.gtkWindowSetDefSize(e.win, 760, 820)
 	vbox := a.gtkBoxNew(1, 0)
 	bar := a.gtkBoxNew(0, 4)
 	e.back = a.gtkButtonNewFromIcon("go-previous", 2)
@@ -323,15 +374,16 @@ func runEngine(h *Helper, o Options) error {
 	a.gtkContainerAdd(e.win, vbox)
 	a.gSignalConnectData(e.entry, "activate", activate, 0, 0, 0)
 	a.gSignalConnectData(e.win, "destroy", destroy, 0, 0, 0)
+	a.gSignalConnectData(e.win, "delete-event", deleteEv, 0, 0, 0)
 	a.gSignalConnectData(e.view, "decide-policy", decide, 0, 0, 0)
 	a.gSignalConnectData(e.view, "notify::uri", notify, 1, 0, 0)
 	a.gSignalConnectData(e.view, "notify::title", notify, 2, 0, 0)
 	a.gSignalConnectData(e.view, "load-changed", loadChanged, 0, 0, 0)
-	a.gtkWidgetShowAll(e.win)
 	e.refresh()
 
+	h.Start(e)
 	h.Emit(Event{Event: EvReady})
-	go h.ReadLoop(o.In, e.post)
+	go h.ReadLoop(o.In, e.Post)
 	a.gtkMain()
 	return nil
 }

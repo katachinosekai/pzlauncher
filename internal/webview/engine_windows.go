@@ -4,9 +4,11 @@ package webview
 
 import (
 	"errors"
+	"os"
 	"runtime"
 	"strings"
 	"sync"
+	"time"
 	"unsafe"
 
 	"github.com/jchv/go-webview2/pkg/edge"
@@ -38,41 +40,43 @@ var (
 )
 
 const (
-	wmDestroy  = 0x0002
-	wmSize     = 0x0005
-	wmClose    = 0x0010
-	wmCommand  = 0x0111
-	wmApp      = 0x8000
-	wsChild    = 0x40000000
-	wsVisible  = 0x10000000
-	wsTabStop  = 0x00010000
-	wsBorder   = 0x00800000
-	wsOverlap  = 0x00CF0000
-	wsClipCh   = 0x02000000
-	esAutoH    = 0x0080
-	bsDefPush  = 0x0001
-	ssCenterV  = 0x0200
-	idOK       = 1
-	idBack     = 101
-	idFwd      = 102
-	idReload   = 103
-	idEdit     = 104
-	idSecure   = 105
-	swRestore  = 9
-	swShow     = 5
-	cwDefault  = 0x80000000
-	ptrSize    = unsafe.Sizeof(uintptr(0))
-	iWV2Source = 4
-	iWV2NavSt  = 7
-	iWV2SrcChg = 11
-	iWV2FrmNav = 17
-	iWV2Reload = 31
-	iWV2Back   = 40
-	iWV2Fwd    = 41
-	iWV2NewWin = 44
-	iWV2TitleC = 46
-	iWV2Title  = 48
-	iCtlCoreWV = 25
+	wmDestroy    = 0x0002
+	wmSize       = 0x0005
+	wmClose      = 0x0010
+	wmCommand    = 0x0111
+	wmApp        = 0x8000
+	wsChild      = 0x40000000
+	wsVisible    = 0x10000000
+	wsTabStop    = 0x00010000
+	wsBorder     = 0x00800000
+	wsOverlap    = 0x00CF0000
+	wsClipCh     = 0x02000000
+	esAutoH      = 0x0080
+	bsDefPush    = 0x0001
+	ssCenterV    = 0x0200
+	idOK         = 1
+	idBack       = 101
+	idFwd        = 102
+	idReload     = 103
+	idEdit       = 104
+	idSecure     = 105
+	swRestore    = 9
+	swShow       = 5
+	swHide       = 0
+	cwDefault    = 0x80000000
+	ptrSize      = unsafe.Sizeof(uintptr(0))
+	iWV2Source   = 4
+	iWV2NavSt    = 7
+	iWV2SrcChg   = 11
+	iWV2FrmNav   = 17
+	iWV2Reload   = 31
+	iWV2DevTools = 36
+	iWV2Back     = 40
+	iWV2Fwd      = 41
+	iWV2NewWin   = 44
+	iWV2TitleC   = 46
+	iWV2Title    = 48
+	iCtlCoreWV   = 25
 )
 
 type wndClassExW struct {
@@ -156,15 +160,33 @@ type winEngine struct {
 	chromium                                   *edge.Chromium
 	wv                                         unsafe.Pointer
 	mu                                         sync.Mutex
-	queue                                      []Command
+	queue                                      []func()
 	handlers                                   []*comHandler
 }
 
 var winEng *winEngine
 
-func (e *winEngine) Navigate(url string) { e.chromium.Navigate(url) }
+func (e *winEngine) Load(url string) { e.chromium.Navigate(url) }
 
-func (e *winEngine) Present() {
+func (e *winEngine) Hide() { pShowWindow.Call(e.hwnd, swHide) }
+
+func (e *winEngine) Eval(js string) { e.chromium.Eval(js) }
+
+func (e *winEngine) ClearData(done func()) {
+	if e.wv != nil {
+		h := &comHandler{vtbl: handlerVtbl}
+		h.fn = func(sender, args unsafe.Pointer) uintptr {
+			e.Post(done)
+			return 0
+		}
+		e.handlers = append(e.handlers, h)
+		comCall(e.wv, iWV2DevTools, utf16("Network.clearBrowserCookies"), utf16("{}"), uintptr(unsafe.Pointer(h)))
+		return
+	}
+	done()
+}
+
+func (e *winEngine) Show() {
 	if r, _, _ := pIsIconic.Call(e.hwnd); r != 0 {
 		pShowWindow.Call(e.hwnd, swRestore)
 	}
@@ -174,9 +196,9 @@ func (e *winEngine) Present() {
 
 func (e *winEngine) Quit() { pDestroyWindow.Call(e.hwnd) }
 
-func (e *winEngine) post(c Command) {
+func (e *winEngine) Post(fn func()) {
 	e.mu.Lock()
-	e.queue = append(e.queue, c)
+	e.queue = append(e.queue, fn)
 	e.mu.Unlock()
 	pPostMessageW.Call(e.hwnd, wmApp+1, 0, 0)
 }
@@ -236,9 +258,6 @@ func (e *winEngine) refresh() {
 		f = 1
 	}
 	pEnableWindow.Call(e.fwd, f)
-	if uri != "" {
-		e.h.URLChanged(uri)
-	}
 }
 
 func (e *winEngine) typed() {
@@ -285,12 +304,12 @@ func wndProc(hwnd uintptr, msg uint32, wp, lp uintptr) uintptr {
 			q := e.queue
 			e.queue = nil
 			e.mu.Unlock()
-			for _, c := range q {
-				e.h.Apply(e, c)
+			for _, fn := range q {
+				fn()
 			}
 			return 0
 		case wmClose:
-			pDestroyWindow.Call(hwnd)
+			e.h.WindowClosed()
 			return 0
 		case wmDestroy:
 			pPostQuitMessage.Call(0)
@@ -313,6 +332,15 @@ func (e *winEngine) child(class, text string, style, id uintptr) uintptr {
 	return h
 }
 
+func removeLater(dir string) {
+	for i := 0; i < 20; i++ {
+		if os.RemoveAll(dir) == nil {
+			return
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+}
+
 func runEngine(h *Helper, o Options) error {
 	runtime.LockOSThread()
 	_ = windows.CoInitializeEx(0, windows.COINIT_APARTMENTTHREADED)
@@ -332,8 +360,8 @@ func runEngine(h *Helper, o Options) error {
 	if r, _, err := pRegisterClassExW.Call(uintptr(unsafe.Pointer(&wc))); r == 0 {
 		return err
 	}
-	e.hwnd, _, _ = pCreateWindowExW.Call(0, utf16("PZLauncherBrowser"), utf16("Steam - PZ Launcher browser"), wsOverlap|wsClipCh,
-		cwDefault, cwDefault, 1150, 850, 0, 0, uintptr(inst), 0)
+	e.hwnd, _, _ = pCreateWindowExW.Call(0, utf16("PZLauncherBrowser"), utf16("Sign in to Steam - PZ Launcher"), wsOverlap|wsClipCh,
+		cwDefault, cwDefault, 760, 820, 0, 0, uintptr(inst), 0)
 	if e.hwnd == 0 {
 		return errors.New("could not create the browser window")
 	}
@@ -345,10 +373,17 @@ func runEngine(h *Helper, o Options) error {
 	e.goBtn = e.child("BUTTON", "Go", wsTabStop|bsDefPush, idOK)
 	e.host = e.child("STATIC", "", wsClipCh, 0)
 	e.layout()
-	pShowWindow.Call(e.hwnd, swShow)
 
 	c := edge.NewChromium()
 	c.DataPath = o.DataDir
+	if o.Ephemeral {
+		tmp, err := os.MkdirTemp("", "pzlauncher-webview-")
+		if err != nil {
+			return err
+		}
+		defer removeLater(tmp)
+		c.DataPath = tmp
+	}
 	c.MessageCallback = h.ScriptMessage
 	if !c.Embed(e.host) {
 		return errors.New("Microsoft Edge WebView2 Runtime is not available")
@@ -363,7 +398,8 @@ func runEngine(h *Helper, o Options) error {
 	if e.wv == nil {
 		return errors.New("WebView2 view missing")
 	}
-	c.Init(WatchScript("window.chrome.webview.postMessage"))
+	h.PostJS = "window.chrome.webview.postMessage"
+	c.Init(PageScript(h.PostJS))
 	nav := func(sender, args unsafe.Pointer) uintptr {
 		uri := comString(args, 3)
 		if h.Decide(uri, comBool(args, 4)) != Allow {
@@ -390,13 +426,14 @@ func runEngine(h *Helper, o Options) error {
 		if t == "" {
 			t = "Steam"
 		}
-		pSetWindowTextW.Call(e.hwnd, utf16(t+" - PZ Launcher browser"))
+		pSetWindowTextW.Call(e.hwnd, utf16(t+" - PZ Launcher"))
 		return 0
 	})
 	c.NavigationCompletedCallback = func(*edge.ICoreWebView2, *edge.ICoreWebView2NavigationCompletedEventArgs) { e.refresh() }
 
+	h.Start(e)
 	h.Emit(Event{Event: EvReady})
-	go h.ReadLoop(o.In, e.post)
+	go h.ReadLoop(o.In, e.Post)
 	var m winMsg
 	for {
 		r, _, _ := pGetMessageW.Call(uintptr(unsafe.Pointer(&m)), 0, 0, 0)

@@ -26,6 +26,11 @@ func (u *ui) buildTabs() *container.AppTabs {
 	for _, d := range defs {
 		tabs.Append(container.NewTabItem(d.title, d.build(u)))
 	}
+	tabs.OnSelected = func(it *container.TabItem) {
+		if f := u.tabHooks[it.Text]; f != nil {
+			f()
+		}
+	}
 	return tabs
 }
 

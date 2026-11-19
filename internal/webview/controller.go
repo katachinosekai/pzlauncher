@@ -6,23 +6,23 @@ import (
 	"os"
 	"os/exec"
 	"sync"
+	"time"
 )
 
 type Controller struct {
-	Exe          string
-	Args         []string
-	Env          []string
-	OpenExternal func(string) error
-	OnEvent      func(Event)
-	OnFallback   func(err error)
+	Exe        string
+	Args       []string
+	Env        []string
+	OnEvent    func(Event)
+	OnFallback func(err error)
 
 	mu       sync.Mutex
 	cmd      *exec.Cmd
 	in       io.WriteCloser
 	ready    bool
+	done     chan struct{}
 	fallback bool
 	notified bool
-	last     string
 }
 
 func (c *Controller) Fallback() bool {
@@ -37,23 +37,15 @@ func (c *Controller) Running() bool {
 	return c.in != nil && c.ready
 }
 
-func (c *Controller) external(url string) error {
-	if c.OpenExternal == nil {
-		return errors.New("no default browser opener")
-	}
-	return c.OpenExternal(url)
-}
-
-func (c *Controller) Open(url string) error {
-	if !Allowed(url) {
-		return c.external(url)
+func (c *Controller) Send(cmd Command) error {
+	if !cmd.Valid() {
+		return errors.New("invalid browser command")
 	}
 	c.mu.Lock()
 	if c.fallback {
 		c.mu.Unlock()
-		return c.external(url)
+		return ErrUnavailable
 	}
-	c.last = url
 	var err error
 	for attempt := 0; attempt < 2; attempt++ {
 		if c.in == nil {
@@ -62,7 +54,7 @@ func (c *Controller) Open(url string) error {
 			}
 		}
 		allowForeground(c.cmd)
-		if err = WriteCommand(c.in, Command{Op: OpNavigate, URL: url}); err == nil {
+		if err = WriteCommand(c.in, cmd); err == nil {
 			c.mu.Unlock()
 			return nil
 		}
@@ -75,7 +67,7 @@ func (c *Controller) Open(url string) error {
 	if notify && c.OnFallback != nil {
 		c.OnFallback(err)
 	}
-	return c.external(url)
+	return ErrUnavailable
 }
 
 func (c *Controller) startLocked() error {
@@ -107,7 +99,12 @@ func (c *Controller) startLocked() error {
 		return err
 	}
 	c.cmd, c.in, c.ready = cmd, in, false
-	go c.watch(cmd, out)
+	done := make(chan struct{})
+	c.done = done
+	go func() {
+		defer close(done)
+		c.watch(cmd, out)
+	}()
 	return nil
 }
 
@@ -150,13 +147,9 @@ func (c *Controller) watch(cmd *exec.Cmd, out io.Reader) {
 	c.fallback = true
 	notify := !c.notified
 	c.notified = true
-	last := c.last
 	c.mu.Unlock()
 	if notify && c.OnFallback != nil {
 		c.OnFallback(unavailable)
-	}
-	if last != "" {
-		_ = c.external(last)
 	}
 }
 
@@ -168,6 +161,19 @@ func (c *Controller) stopLocked() {
 		_ = c.cmd.Process.Kill()
 	}
 	c.cmd, c.in, c.ready = nil, nil, false
+}
+
+func (c *Controller) CloseWait(d time.Duration) {
+	c.mu.Lock()
+	done := c.done
+	c.mu.Unlock()
+	c.Close()
+	if done != nil {
+		select {
+		case <-done:
+		case <-time.After(d):
+		}
+	}
 }
 
 func (c *Controller) Close() {

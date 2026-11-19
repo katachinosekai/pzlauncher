@@ -18,10 +18,19 @@ import (
 var version = "dev"
 
 type ui struct {
-	app    fyne.App
-	win    fyne.Window
-	ctx    context.Context
-	client *update.Client
+	app      fyne.App
+	win      fyne.Window
+	ctx      context.Context
+	client   *update.Client
+	closers  []func()
+	tabHooks map[string]func()
+}
+
+func (u *ui) onTab(title string, fn func()) {
+	if u.tabHooks == nil {
+		u.tabHooks = map[string]func(){}
+	}
+	u.tabHooks[title] = fn
 }
 
 func main() {
@@ -49,7 +58,12 @@ func main() {
 	a.Lifecycle().SetOnStarted(u.askMusicOnce)
 	w.SetContent(container.NewBorder(nil, u.aboutBar(), nil, nil, tabs))
 	w.Resize(fyne.NewSize(900, 820))
-	w.SetOnClosed(cancel)
+	w.SetOnClosed(func() {
+		for _, f := range u.closers {
+			f()
+		}
+		cancel()
+	})
 	w.ShowAndRun()
 }
 
