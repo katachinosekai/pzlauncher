@@ -2,14 +2,10 @@ package workshop
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
 	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 
 	"github.com/kata/pzlauncher/internal/install"
@@ -61,6 +57,7 @@ type Result struct {
 	CollectionID string
 	ContentDir   string
 	ACFFound     bool
+	IDs          []string
 	Total        int
 	Installed    int
 	Missing      []Item
@@ -106,7 +103,7 @@ func Check(ctx context.Context, o Options) (*Result, error) {
 	if err != nil {
 		return nil, err
 	}
-	r := &Result{CollectionID: o.CollectionID, ContentDir: o.ContentDir, Total: len(ids)}
+	r := &Result{CollectionID: o.CollectionID, ContentDir: o.ContentDir, IDs: ids, Total: len(ids)}
 	missing := install.MissingItems(o.ContentDir, ids)
 	r.Installed = len(ids) - len(missing)
 	var acf *ACF
@@ -144,50 +141,12 @@ func Check(ctx context.Context, o Options) (*Result, error) {
 }
 
 func FetchTitles(ctx context.Context, client *http.Client, api string, ids []string) (map[string]string, error) {
-	if client == nil {
-		client = http.DefaultClient
-	}
-	if api == "" {
-		api = DefaultDetailsAPI
-	}
+	det, err := FetchDetails(ctx, client, api, ids)
 	out := map[string]string{}
-	for start := 0; start < len(ids); start += 100 {
-		end := min(start+100, len(ids))
-		form := url.Values{"itemcount": {strconv.Itoa(end - start)}}
-		for i, id := range ids[start:end] {
-			form.Set(fmt.Sprintf("publishedfileids[%d]", i), id)
-		}
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, api, strings.NewReader(form.Encode()))
-		if err != nil {
-			return out, err
-		}
-		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-		resp, err := client.Do(req)
-		if err != nil {
-			return out, err
-		}
-		var body struct {
-			Response struct {
-				Details []struct {
-					ID    string `json:"publishedfileid"`
-					Title string `json:"title"`
-				} `json:"publishedfiledetails"`
-			} `json:"response"`
-		}
-		if resp.StatusCode != http.StatusOK {
-			resp.Body.Close()
-			return out, fmt.Errorf("details API: %s", resp.Status)
-		}
-		err = json.NewDecoder(resp.Body).Decode(&body)
-		resp.Body.Close()
-		if err != nil {
-			return out, err
-		}
-		for _, d := range body.Response.Details {
-			if d.Title != "" {
-				out[d.ID] = d.Title
-			}
+	for id, d := range det {
+		if d.Title != "" {
+			out[id] = d.Title
 		}
 	}
-	return out, nil
+	return out, err
 }
