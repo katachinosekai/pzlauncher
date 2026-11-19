@@ -5,6 +5,7 @@ import (
 	"image/png"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -34,7 +35,11 @@ func TestScreenshots(t *testing.T) {
 	u := &ui{app: a, win: w, ctx: ctx, client: update.NewClient()}
 	tabs := u.buildTabs()
 	w.SetContent(container.NewBorder(nil, u.aboutBar(), nil, nil, tabs))
-	w.Resize(fyne.NewSize(900, 820))
+	h := float32(820)
+	if v, err := strconv.Atoi(os.Getenv("PZL_SHOTS_H")); err == nil && v > 0 {
+		h = float32(v)
+	}
+	w.Resize(fyne.NewSize(900, h))
 	wait := 4 * time.Second
 	if v := os.Getenv("PZL_SHOTS_WAIT"); v != "" {
 		if d, err := time.ParseDuration(v); err == nil {

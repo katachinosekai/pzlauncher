@@ -45,7 +45,9 @@ func main() {
 	w := a.NewWindow("PZ Launcher")
 	u := &ui{app: a, win: w, ctx: ctx, client: update.NewClient()}
 
+	u.loadMusic()
 	tabs := u.buildTabs()
+	a.Lifecycle().SetOnStarted(u.askMusicOnce)
 	w.SetContent(container.NewBorder(nil, u.aboutBar(), nil, nil, tabs))
 	w.Resize(fyne.NewSize(900, 820))
 	w.SetOnClosed(cancel)

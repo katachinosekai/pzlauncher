@@ -164,22 +164,67 @@ func newServerItem() (fyne.CanvasObject, *serverParts) {
 	return container.NewVBox(top, details), p
 }
 
-func newSaveItem() fyne.CanvasObject {
-	img := canvas.NewImageFromResource(nil)
-	img.FillMode = canvas.ImageFillContain
-	img.CornerRadius = 8
-	img.SetMinSize(fyne.NewSize(64, 64))
-	name := widget.NewLabel("")
-	name.Truncation = fyne.TextTruncateEllipsis
-	info := widget.NewLabel("")
-	icon := widget.NewIcon(nil)
-	icon.Hide()
-	mid := container.NewVBox(layout.NewSpacer(), name, layout.NewSpacer())
-	bg := canvas.NewRectangle(theme.Color(theme.ColorNameInputBackground))
-	bg.CornerRadius = 10
-	right := container.NewHBox(container.NewCenter(icon), container.NewCenter(info))
-	inner := container.New(layout.NewCustomPaddedLayout(4, 4, 4, 8), container.NewBorder(nil, nil, img, right, mid))
-	return container.New(layout.NewCustomPaddedLayout(3, 3, 0, 0), container.NewStack(bg, inner))
+type tapCard struct {
+	widget.BaseWidget
+	content fyne.CanvasObject
+	onTap   func()
+	onMenu  func(*fyne.PointEvent)
+}
+
+func newTapCard(c fyne.CanvasObject) *tapCard {
+	t := &tapCard{content: c}
+	t.ExtendBaseWidget(t)
+	return t
+}
+
+func (t *tapCard) CreateRenderer() fyne.WidgetRenderer { return widget.NewSimpleRenderer(t.content) }
+
+func (t *tapCard) Tapped(*fyne.PointEvent) {
+	if t.onTap != nil {
+		t.onTap()
+	}
+}
+
+func (t *tapCard) TappedSecondary(e *fyne.PointEvent) {
+	if t.onMenu != nil {
+		t.onMenu(e)
+	}
+}
+
+type saveParts struct {
+	card       *tapCard
+	bg         *canvas.Rectangle
+	img        *canvas.Image
+	name, info *widget.Label
+	icon       *widget.Icon
+	toggle     *widget.Button
+	details    *fyne.Container
+}
+
+func newSaveItem() (fyne.CanvasObject, *saveParts) {
+	p := &saveParts{
+		bg:      canvas.NewRectangle(theme.Color(theme.ColorNameInputBackground)),
+		img:     canvas.NewImageFromResource(nil),
+		name:    widget.NewLabel(""),
+		info:    widget.NewLabel(""),
+		icon:    widget.NewIcon(nil),
+		toggle:  widget.NewButtonWithIcon("", theme.MenuDropDownIcon(), nil),
+		details: container.NewStack(),
+	}
+	p.img.FillMode = canvas.ImageFillContain
+	p.img.CornerRadius = 8
+	p.img.SetMinSize(fyne.NewSize(64, 64))
+	p.name.Truncation = fyne.TextTruncateEllipsis
+	p.icon.Hide()
+	p.toggle.Importance = widget.LowImportance
+	p.bg.CornerRadius = 10
+	p.details.Hide()
+	mid := container.NewVBox(layout.NewSpacer(), p.name, layout.NewSpacer())
+	right := container.NewHBox(container.NewCenter(p.icon), container.NewCenter(p.info), container.NewCenter(p.toggle))
+	inner := container.New(layout.NewCustomPaddedLayout(4, 4, 4, 4), container.NewBorder(nil, nil, p.img, right, mid))
+	p.card = newTapCard(container.NewStack(p.bg, inner))
+	body := container.NewVBox(p.card, container.New(layout.NewCustomPaddedLayout(0, 0, 16, 0), p.details))
+	return container.New(layout.NewCustomPaddedLayout(3, 3, 0, 0), body), p
 }
 
 func (u *ui) playTab() fyne.CanvasObject {
@@ -189,7 +234,6 @@ func (u *ui) playTab() fyne.CanvasObject {
 		target       *play.Target
 		targetKey    string
 		selectedDesc string
-		picked       = -1
 		selectedSave = -1
 		statMu       sync.Mutex
 		stats        = map[string]play.ServerStatus{}
@@ -198,7 +242,11 @@ func (u *ui) playTab() fyne.CanvasObject {
 		serverChecks = map[string]play.CheckResult{}
 		expanded     = map[string]bool{}
 		itemParts    = map[fyne.CanvasObject]*serverParts{}
+		saveParts    = map[fyne.CanvasObject]*saveParts{}
+		saveOpen     = map[string]bool{}
+		savePanels   = map[string]fyne.CanvasObject{}
 	)
+	const detailsH = 280
 	nickPath, _ := play.NicknamesPath()
 	nicks, _ := play.LoadNicknames(nickPath)
 	status := widget.NewLabel("")
@@ -255,54 +303,126 @@ func (u *ui) playTab() fyne.CanvasObject {
 		statusScroll.ScrollToTop()
 	}
 
-	saveList := widget.NewList(
+	cardH := func() float32 { o, _ := newSaveItem(); return o.MinSize().Height }()
+	var saveList *widget.List
+	var fitSaves func()
+	var nicknameFor func(play.Save)
+	panelFor := func(sv play.Save) fyne.CanvasObject {
+		if p, ok := savePanels[sv.Dir]; ok {
+			return p
+		}
+		scroll := container.NewVScroll(u.saveDetails(sv, func() { saveList.Refresh() }))
+		scroll.SetMinSize(fyne.NewSize(0, detailsH))
+		savePanels[sv.Dir] = scroll
+		return scroll
+	}
+	toggleDetails := func(id widget.ListItemID) {
+		if id < 1 || id > len(saves) {
+			return
+		}
+		key := saves[id-1].Dir
+		saveOpen[key] = !saveOpen[key]
+		h := cardH
+		if saveOpen[key] {
+			h += detailsH + theme.Padding()
+		}
+		saveList.SetItemHeight(id, h)
+		saveList.RefreshItem(id)
+		fitSaves()
+	}
+	saveList = widget.NewList(
 		func() int { return len(saves) + 1 },
-		newSaveItem,
+		func() fyne.CanvasObject {
+			o, p := newSaveItem()
+			saveParts[o] = p
+			return o
+		},
 		func(id widget.ListItemID, o fyne.CanvasObject) {
-			refs := findParts(o)
-			name, info, img := refs.name, refs.info, refs.img
-			refs.bg.FillColor = theme.Color(theme.ColorNameInputBackground)
-			if id == selectedSave {
-				refs.bg.FillColor = theme.Color(theme.ColorNameSelection)
+			p := saveParts[o]
+			if p == nil || id > len(saves) {
+				return
 			}
-			refs.bg.Refresh()
+			p.bg.FillColor = theme.Color(theme.ColorNameInputBackground)
+			if id == selectedSave {
+				p.bg.FillColor = theme.Color(theme.ColorNameSelection)
+			}
+			p.bg.Refresh()
 			thumb := ""
 			var check play.CheckResult
 			known := false
 			statMu.Lock()
 			if id == 0 {
-				name.SetText("Continue latest save")
-				info.SetText("")
+				p.name.SetText("Continue latest save")
+				p.info.SetText("")
 				if len(saves) > 0 {
 					thumb = saves[0].Thumb()
-					info.SetText(saves[0].Modified.Format("2006-01-02 15:04"))
+					p.info.SetText(saves[0].Modified.Format("2006-01-02 15:04"))
 				}
 				if latestCheck != nil {
 					check, known = *latestCheck, true
 				}
 			} else {
-				s := saves[id-1]
-				name.SetText(nicks.Display(s))
-				info.SetText(s.Modified.Format("2006-01-02 15:04"))
-				thumb = s.Thumb()
-				check, known = saveChecks[s.Dir]
+				sv := saves[id-1]
+				p.name.SetText(nicks.Display(sv))
+				p.info.SetText(sv.Modified.Format("2006-01-02 15:04"))
+				thumb = sv.Thumb()
+				check, known = saveChecks[sv.Dir]
 			}
 			statMu.Unlock()
-			setIssueIcon(refs.icon, check, known)
-			img.File = thumb
-			img.Resource = nil
+			setIssueIcon(p.icon, check, known)
+			p.img.File = thumb
+			p.img.Resource = nil
 			if thumb == "" {
-				img.Resource = theme.FileImageIcon()
+				p.img.Resource = theme.FileImageIcon()
 			}
-			img.Refresh()
+			p.img.Refresh()
+			p.card.onTap = func() { saveList.Select(id) }
+			if id == 0 {
+				p.toggle.Hide()
+				p.details.Hide()
+				p.card.onMenu = nil
+				return
+			}
+			sv := saves[id-1]
+			p.toggle.Show()
+			p.toggle.OnTapped = func() { toggleDetails(id) }
+			if saveOpen[sv.Dir] {
+				p.toggle.SetIcon(theme.MenuDropUpIcon())
+				p.details.Objects = []fyne.CanvasObject{panelFor(sv)}
+				p.details.Show()
+			} else {
+				p.toggle.SetIcon(theme.MenuDropDownIcon())
+				p.details.Objects = nil
+				p.details.Hide()
+			}
+			p.details.Refresh()
+			p.card.onMenu = func(e *fyne.PointEvent) {
+				saveList.Select(id)
+				label := "Show details && backups"
+				if saveOpen[sv.Dir] {
+					label = "Hide details && backups"
+				}
+				menu := fyne.NewMenu("",
+					fyne.NewMenuItem("Nickname...", func() { nicknameFor(sv) }),
+					fyne.NewMenuItem(strings.ReplaceAll(label, "&&", "&"), func() { toggleDetails(id) }),
+					fyne.NewMenuItem("Open save folder", func() { u.openFolder(sv.Dir) }),
+				)
+				widget.ShowPopUpMenuAtPosition(menu, u.win.Canvas(), e.AbsolutePosition)
+			}
 		},
 	)
 
-	cardH := newSaveItem().MinSize().Height
 	saveArea := canvas.NewRectangle(color.Transparent)
-	fitSaves := func() {
+	fitSaves = func() {
 		n := min(len(saves)+1, 5)
-		saveArea.SetMinSize(fyne.NewSize(0, float32(n)*cardH+float32(n-1)*theme.Padding()))
+		h := float32(n)*cardH + float32(n-1)*theme.Padding()
+		for i := 0; i < n-1 && i < len(saves); i++ {
+			if saveOpen[saves[i].Dir] {
+				h += detailsH + theme.Padding()
+				break
+			}
+		}
+		saveArea.SetMinSize(fyne.NewSize(0, h))
 		saveArea.Refresh()
 	}
 
@@ -360,38 +480,6 @@ func (u *ui) playTab() fyne.CanvasObject {
 		},
 	)
 
-	nickBtn := widget.NewButton("Nickname...", nil)
-	nickBtn.Disable()
-
-	detailsOpen := false
-	detailsBox := container.NewStack()
-	detailsBox.Hide()
-	detailsBtn := widget.NewButtonWithIcon("Save details", theme.MenuExpandIcon(), nil)
-	detailsBtn.Disable()
-	syncDetails := func() {
-		if picked < 0 || picked >= len(saves) {
-			detailsBtn.Disable()
-			detailsBox.Hide()
-			return
-		}
-		detailsBtn.Enable()
-		if !detailsOpen {
-			detailsBtn.SetIcon(theme.MenuExpandIcon())
-			detailsBox.Hide()
-			return
-		}
-		detailsBtn.SetIcon(theme.MenuDropDownIcon())
-		scroll := container.NewVScroll(u.saveDetails(saves[picked], func() { saveList.Refresh() }))
-		scroll.SetMinSize(fyne.NewSize(0, 260))
-		detailsBox.Objects = []fyne.CanvasObject{scroll}
-		detailsBox.Show()
-		detailsBox.Refresh()
-	}
-	detailsBtn.OnTapped = func() {
-		detailsOpen = !detailsOpen
-		syncDetails()
-	}
-
 	saveList.HideSeparators = true
 	saveList.OnUnselected = func(id widget.ListItemID) {
 		selectedSave = -1
@@ -404,24 +492,16 @@ func (u *ui) playTab() fyne.CanvasObject {
 		t := play.Latest()
 		selectedDesc = "Continue latest save"
 		targetKey = ""
-		picked = -1
-		nickBtn.Disable()
 		if id > 0 {
 			t = play.SaveTarget(saves[id-1])
 			selectedDesc = nicks.Display(saves[id-1])
 			targetKey = saves[id-1].Dir
-			picked = id - 1
-			nickBtn.Enable()
 		}
-		syncDetails()
 		target = &t
 		showSelection()
 	}
 	serverList.OnSelected = func(id widget.ListItemID) {
 		saveList.UnselectAll()
-		picked = -1
-		nickBtn.Disable()
-		syncDetails()
 		r := servers[id]
 		account := ""
 		if r.hasAcct {
@@ -495,8 +575,9 @@ func (u *ui) playTab() fyne.CanvasObject {
 		launch.Disable()
 		saveList.UnselectAll()
 		serverList.UnselectAll()
-		picked = -1
-		syncDetails()
+		for k := range savePanels {
+			delete(savePanels, k)
+		}
 		saveList.Refresh()
 		serverList.Refresh()
 		if err == nil && serr == nil {
@@ -597,11 +678,7 @@ func (u *ui) playTab() fyne.CanvasObject {
 		d.Show()
 	}
 
-	nickBtn.OnTapped = func() {
-		if picked < 0 || picked >= len(saves) {
-			return
-		}
-		s := saves[picked]
+	nicknameFor = func(s play.Save) {
 		entry := widget.NewEntry()
 		entry.SetText(nicks.Get(s))
 		entry.SetPlaceHolder("leave empty to remove the nickname")
@@ -679,8 +756,8 @@ func (u *ui) playTab() fyne.CanvasObject {
 	serverArea.SetMinSize(fyne.NewSize(0, expandedH))
 	savesBox := container.NewBorder(widget.NewLabelWithStyle("Single player", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), nil, nil, nil, container.NewStack(saveArea, saveList))
 	serversBox := container.NewBorder(widget.NewLabelWithStyle("Servers", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), nil, nil, nil, container.NewStack(serverArea, serverList))
-	lists := container.NewBorder(container.NewVBox(savesBox, detailsBox), nil, nil, nil, serversBox)
-	bottom := container.NewVBox(statusScroll, container.NewHBox(launch, nickBtn, detailsBtn, refreshBtn))
+	lists := container.NewBorder(savesBox, nil, nil, nil, serversBox)
+	bottom := container.NewVBox(statusScroll, container.NewHBox(launch, refreshBtn))
 	return container.NewBorder(nil, bottom, nil, nil, lists)
 }
 

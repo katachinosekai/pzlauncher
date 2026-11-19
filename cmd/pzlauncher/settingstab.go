@@ -357,6 +357,6 @@ func (u *ui) settingsTab() fyne.CanvasObject {
 		status.SetText(strings.Join(msgs, "\n"))
 	}
 
-	body := container.NewVBox(memCard, javaCard, gameCard, debugCard, safety)
+	body := container.NewVBox(memCard, javaCard, gameCard, debugCard, u.musicCard(), safety)
 	return container.NewBorder(container.NewBorder(nil, nil, nil, reload, status), nil, nil, nil, container.NewVScroll(body))
 }
