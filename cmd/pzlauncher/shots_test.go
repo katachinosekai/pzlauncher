@@ -48,6 +48,15 @@ func TestScreenshots(t *testing.T) {
 	}
 	for i, item := range tabs.Items {
 		tabs.SelectIndex(i)
+		if sub := os.Getenv("PZL_SHOTS_TOOLS_TAB"); sub != "" {
+			if inner, ok := item.Content.(*container.AppTabs); ok {
+				for _, it := range inner.Items {
+					if it.Text == sub {
+						inner.Select(it)
+					}
+				}
+			}
+		}
 		time.Sleep(wait)
 		img := w.Canvas().Capture()
 		name := strings.NewReplacer(" ", "", "/", "-").Replace(item.Text)

@@ -20,6 +20,7 @@ func (u *ui) toolsTab() fyne.CanvasObject {
 		container.NewTabItem("Workshop", u.workshopTab()),
 		container.NewTabItem("Java mods", u.javaModsTab()),
 		container.NewTabItem("Logs", u.logsTab()),
+		container.NewTabItem("ZombieBuddy", u.zombieBuddyTab()),
 	)
 	return inner
 }

@@ -533,8 +533,10 @@ func (in *Installer) Memory(ctx context.Context) error {
 	return nil
 }
 
-func (in *Installer) launchFiles() []string {
-	ents, err := os.ReadDir(filepath.Join(in.steamRoot, "userdata"))
+func (in *Installer) launchFiles() []string { return LaunchFiles(in.steamRoot) }
+
+func LaunchFiles(steamRoot string) []string {
+	ents, err := os.ReadDir(filepath.Join(steamRoot, "userdata"))
 	if err != nil {
 		return nil
 	}
@@ -543,7 +545,7 @@ func (in *Installer) launchFiles() []string {
 		if !e.IsDir() {
 			continue
 		}
-		p := filepath.Join(in.steamRoot, "userdata", e.Name(), "config", "localconfig.vdf")
+		p := filepath.Join(steamRoot, "userdata", e.Name(), "config", "localconfig.vdf")
 		if isFile(p) {
 			out = append(out, p)
 		}
@@ -631,6 +633,9 @@ func (in *Installer) zbbatchWindows(ctx context.Context) error {
 	case pending == 0 && already > 0:
 		in.say("  already switched on in Steam's launch options")
 		return nil
+	case pending == 0 && in.zb.planned:
+		in.say("  (dry run) switched on in Steam's launch options once ZombieBuddy is set up")
+		return nil
 	case pending == 0:
 		in.warn("ZombieBuddy's Steam launch option (-agentlib:zbNative --) was not found, so ZBBatch is not switched on. Set up ZombieBuddy first, then run the installer again.")
 		return nil
@@ -709,6 +714,9 @@ func (in *Installer) zbbatchLinux(ctx context.Context) error {
 	if inLaunch {
 		in.say("  already switched on in Steam's launch options")
 		return nil
+	}
+	if !loader && in.zb.planned {
+		loader = true
 	}
 	if !loader {
 		in.warn("ZombieBuddy's loader (-javaagent:ZombieBuddy.jar in Steam's launch options) was not found, so ZBBatch is not switched on. Set up ZombieBuddy first, then run the installer again.")

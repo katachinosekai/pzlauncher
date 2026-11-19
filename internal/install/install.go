@@ -40,24 +40,27 @@ type WaitStatus struct {
 }
 
 type Options struct {
-	PackDir           string
-	Log               func(string)
-	DryRun            bool
-	NoWait            bool
-	SteamRoot         string
-	ZomboidDir        string
-	ZombieBuddyHome   string
-	BackupRoot        string
-	LogDir            string
-	NoLogFile         bool
-	GOOS              string
-	System            System
-	HTTPClient        *http.Client
-	CollectionAPI     string
-	PollInterval      time.Duration
-	SteamPollInterval time.Duration
-	OnWait            func(WaitStatus)
-	Now               func() time.Time
+	PackDir                string
+	Log                    func(string)
+	DryRun                 bool
+	NoWait                 bool
+	SteamRoot              string
+	ZomboidDir             string
+	ZombieBuddyHome        string
+	BackupRoot             string
+	LogDir                 string
+	NoLogFile              bool
+	GOOS                   string
+	System                 System
+	HTTPClient             *http.Client
+	CollectionAPI          string
+	PollInterval           time.Duration
+	SteamPollInterval      time.Duration
+	OnWait                 func(WaitStatus)
+	Now                    func() time.Time
+	SetupZombieBuddy       bool
+	RemoveZombieBuddy      bool
+	RemoveZombieBuddyFiles bool
 }
 
 type Report struct {
@@ -92,6 +95,7 @@ type Installer struct {
 	gameDir   string
 	zdir      string
 	zbHome    string
+	zb        zbState
 }
 
 func New(opts Options) (*Installer, error) {
@@ -150,6 +154,7 @@ func (in *Installer) Steps() []Step {
 		{"presets", "World presets", in.Presets},
 		{"localmods", "Local mods", in.LocalMods},
 		{"versionmax", "42.21 mods on 42.22", in.VersionMax},
+		{"zombiebuddy", "ZombieBuddy setup", in.ZombieBuddy},
 		{"approvals", "ZombieBuddy approvals", in.Approvals},
 		{"memory", "Game memory", in.Memory},
 		{"zbbatch", "ZBBatch", in.ZBBatch},
@@ -208,6 +213,7 @@ func (in *Installer) change(msg string) {
 }
 
 func (in *Installer) Finish(err error) Report {
+	in.restartSteamIfClosed()
 	if err != nil {
 		in.report.Failed = true
 		in.say("error: " + err.Error())

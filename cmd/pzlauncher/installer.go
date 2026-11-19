@@ -13,9 +13,10 @@ var runInstall InstallFunc = realInstall
 
 func realInstall(ctx context.Context, packDir string, dryRun bool, log func(string)) (string, error) {
 	r, err := install.Run(ctx, install.Options{
-		PackDir: packDir,
-		DryRun:  dryRun,
-		Log:     log,
+		PackDir:          packDir,
+		DryRun:           dryRun,
+		Log:              log,
+		SetupZombieBuddy: zbWanted(),
 		OnWait: func(w install.WaitStatus) {
 			if !w.Done {
 				log(fmt.Sprintf("waiting for %s: %d of %d installed", w.What, w.Installed, w.Total))
