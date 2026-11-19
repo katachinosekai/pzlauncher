@@ -3,9 +3,14 @@ package main
 import (
 	"errors"
 	"fmt"
+	"sync"
+	"time"
 
 	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/dialog"
+	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
 	"github.com/kata/pzlauncher/internal/play"
@@ -34,40 +39,79 @@ func (u *ui) playTab() fyne.CanvasObject {
 		saves   []play.Save
 		servers []serverRow
 		target  *play.Target
+		picked  = -1
+		statMu  sync.Mutex
+		stats   = map[string]play.ServerStatus{}
 	)
+	nickPath, _ := play.NicknamesPath()
+	nicks, _ := play.LoadNicknames(nickPath)
 	status := widget.NewLabel("")
 	status.Wrapping = fyne.TextWrapWord
 
 	saveList := widget.NewList(
 		func() int { return len(saves) + 1 },
-		func() fyne.CanvasObject { return widget.NewLabel("") },
+		func() fyne.CanvasObject {
+			img := canvas.NewImageFromResource(nil)
+			img.FillMode = canvas.ImageFillContain
+			img.SetMinSize(fyne.NewSize(64, 64))
+			return container.NewHBox(img, container.NewCenter(widget.NewLabel("")))
+		},
 		func(id widget.ListItemID, o fyne.CanvasObject) {
-			l := o.(*widget.Label)
+			row := o.(*fyne.Container)
+			img := row.Objects[0].(*canvas.Image)
+			l := row.Objects[1].(*fyne.Container).Objects[0].(*widget.Label)
+			thumb := ""
 			if id == 0 {
 				l.SetText("Continue latest save")
-				return
+				if len(saves) > 0 {
+					thumb = saves[0].Thumb()
+				}
+			} else {
+				s := saves[id-1]
+				l.SetText(fmt.Sprintf("%s    %s", nicks.Display(s), s.Modified.Format("2006-01-02 15:04")))
+				thumb = s.Thumb()
 			}
-			s := saves[id-1]
-			l.SetText(fmt.Sprintf("%s    %s", s.Label(), s.Modified.Format("2006-01-02 15:04")))
+			img.File = thumb
+			img.Resource = nil
+			if thumb == "" {
+				img.Resource = theme.FileImageIcon()
+			}
+			img.Refresh()
 		},
 	)
 	serverList := widget.NewList(
 		func() int { return len(servers) },
-		func() fyne.CanvasObject { return widget.NewLabel("") },
-		func(id widget.ListItemID, o fyne.CanvasObject) { o.(*widget.Label).SetText(servers[id].label()) },
+		func() fyne.CanvasObject { return widget.NewLabel("server\nstatus") },
+		func(id widget.ListItemID, o fyne.CanvasObject) {
+			r := servers[id]
+			statMu.Lock()
+			st, ok := stats[r.server.Addr()]
+			statMu.Unlock()
+			text := "checking..."
+			if ok {
+				text = st.String()
+			}
+			o.(*widget.Label).SetText(r.label() + "\n" + text)
+		},
 	)
 
 	launch := widget.NewButton("Launch", nil)
 	launch.Importance = widget.HighImportance
 	launch.Disable()
+	nickBtn := widget.NewButton("Nickname...", nil)
+	nickBtn.Disable()
 
 	saveList.OnSelected = func(id widget.ListItemID) {
 		serverList.UnselectAll()
 		t := play.Latest()
 		desc := "Continue latest save"
+		picked = -1
+		nickBtn.Disable()
 		if id > 0 {
 			t = play.SaveTarget(saves[id-1])
-			desc = saves[id-1].Label()
+			desc = nicks.Display(saves[id-1])
+			picked = id - 1
+			nickBtn.Enable()
 		}
 		target = &t
 		status.SetText("Selected: " + desc)
@@ -75,6 +119,8 @@ func (u *ui) playTab() fyne.CanvasObject {
 	}
 	serverList.OnSelected = func(id widget.ListItemID) {
 		saveList.UnselectAll()
+		picked = -1
+		nickBtn.Disable()
 		r := servers[id]
 		account := ""
 		if r.hasAcct {
@@ -97,15 +143,18 @@ func (u *ui) playTab() fyne.CanvasObject {
 			status.SetText("Could not read saves: " + err.Error())
 		}
 		list, serr := play.ListServers()
-		servers = servers[:0]
+		var rows []serverRow
 		for _, s := range list {
 			if len(s.Accounts) == 0 {
-				servers = append(servers, serverRow{server: s})
+				rows = append(rows, serverRow{server: s})
 			}
 			for _, a := range s.Accounts {
-				servers = append(servers, serverRow{server: s, account: a, hasAcct: true})
+				rows = append(rows, serverRow{server: s, account: a, hasAcct: true})
 			}
 		}
+		statMu.Lock()
+		servers = rows
+		statMu.Unlock()
 		if serr != nil {
 			status.SetText("Could not read the server list: " + serr.Error())
 		}
@@ -143,13 +192,68 @@ func (u *ui) playTab() fyne.CanvasObject {
 		}()
 	}
 
-	refreshBtn := widget.NewButton("Refresh", refresh)
+	nickBtn.OnTapped = func() {
+		if picked < 0 || picked >= len(saves) {
+			return
+		}
+		s := saves[picked]
+		entry := widget.NewEntry()
+		entry.SetText(nicks.Get(s))
+		entry.SetPlaceHolder("leave empty to remove the nickname")
+		dialog.ShowForm("Nickname for "+s.Label(), "Save", "Cancel",
+			[]*widget.FormItem{widget.NewFormItem("Nickname", entry)},
+			func(ok bool) {
+				if !ok {
+					return
+				}
+				if err := nicks.Set(s, entry.Text); err != nil {
+					status.SetText("Could not save the nickname: " + err.Error())
+					return
+				}
+				saveList.Refresh()
+				status.SetText("Selected: " + nicks.Display(s))
+			}, u.win)
+	}
+
+	pollStatus := func() {
+		statMu.Lock()
+		addrs := map[string]play.Server{}
+		for _, r := range servers {
+			addrs[r.server.Addr()] = r.server
+		}
+		statMu.Unlock()
+		for addr, srv := range addrs {
+			st := play.QueryServer(srv.IP, srv.Port, 2*time.Second)
+			statMu.Lock()
+			stats[addr] = st
+			statMu.Unlock()
+		}
+		fyne.Do(serverList.Refresh)
+	}
+	go func() {
+		t := time.NewTicker(15 * time.Second)
+		defer t.Stop()
+		for {
+			select {
+			case <-u.ctx.Done():
+				return
+			case <-t.C:
+				pollStatus()
+			}
+		}
+	}()
+
+	refreshBtn := widget.NewButton("Refresh", func() {
+		refresh()
+		go pollStatus()
+	})
 	refresh()
+	go pollStatus()
 
 	lists := container.NewGridWithRows(2,
 		container.NewBorder(widget.NewLabelWithStyle("Single player", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), nil, nil, nil, saveList),
 		container.NewBorder(widget.NewLabelWithStyle("Servers", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), nil, nil, nil, serverList),
 	)
-	bottom := container.NewVBox(status, container.NewHBox(launch, refreshBtn))
+	bottom := container.NewVBox(status, container.NewHBox(launch, nickBtn, refreshBtn))
 	return container.NewBorder(nil, bottom, nil, nil, lists)
 }

@@ -27,10 +27,14 @@ type ui struct {
 
 func main() {
 	showVersion := flag.Bool("version", false, "print the launcher version")
+	cli := registerCLI()
 	flag.Parse()
 	if *showVersion {
 		fmt.Println(version)
 		return
+	}
+	if *cli.installPack != "" {
+		os.Exit(runCLI(cli))
 	}
 	update.CleanupOld()
 

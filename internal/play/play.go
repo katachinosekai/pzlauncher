@@ -29,6 +29,14 @@ type Save struct {
 
 func (s Save) Label() string { return s.Mode + " / " + s.World }
 
+func (s Save) Thumb() string {
+	p := filepath.Join(s.Dir, "thumb.png")
+	if st, err := os.Stat(p); err == nil && !st.IsDir() {
+		return p
+	}
+	return ""
+}
+
 type Account struct {
 	Username      string
 	PasswordSaved bool
