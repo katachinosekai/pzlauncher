@@ -413,6 +413,7 @@ func (u *ui) playTab() fyne.CanvasObject {
 	)
 
 	saveArea := canvas.NewRectangle(color.Transparent)
+	var lists *fyne.Container
 	fitSaves = func() {
 		n := min(len(saves)+1, 5)
 		h := float32(n)*cardH + float32(n-1)*theme.Padding()
@@ -424,6 +425,9 @@ func (u *ui) playTab() fyne.CanvasObject {
 		}
 		saveArea.SetMinSize(fyne.NewSize(0, h))
 		saveArea.Refresh()
+		if lists != nil {
+			lists.Refresh()
+		}
 	}
 
 	baseItem, baseParts := newServerItem()
@@ -756,7 +760,7 @@ func (u *ui) playTab() fyne.CanvasObject {
 	serverArea.SetMinSize(fyne.NewSize(0, expandedH))
 	savesBox := container.NewBorder(widget.NewLabelWithStyle("Single player", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), nil, nil, nil, container.NewStack(saveArea, saveList))
 	serversBox := container.NewBorder(widget.NewLabelWithStyle("Servers", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), nil, nil, nil, container.NewStack(serverArea, serverList))
-	lists := container.NewBorder(savesBox, nil, nil, nil, serversBox)
+	lists = container.NewBorder(savesBox, nil, nil, nil, serversBox)
 	bottom := container.NewVBox(statusScroll, container.NewHBox(launch, refreshBtn))
 	return container.NewBorder(nil, bottom, nil, nil, lists)
 }
