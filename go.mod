@@ -4,7 +4,9 @@ go 1.26.0
 
 require (
 	fyne.io/fyne/v2 v2.8.2
+	github.com/ebitengine/purego v0.8.0
 	github.com/gopxl/beep/v2 v2.1.1
+	github.com/jchv/go-webview2 v0.0.0-20260205173254-56598839c808
 	github.com/jfreymuth/pulse v0.1.3
 	golang.org/x/sys v0.50.0
 	modernc.org/sqlite v1.62.0
@@ -19,7 +21,6 @@ require (
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/dustin/go-humanize v1.1.0 // indirect
 	github.com/ebitengine/oto/v3 v3.3.2 // indirect
-	github.com/ebitengine/purego v0.8.0 // indirect
 	github.com/fsnotify/fsnotify v1.9.0 // indirect
 	github.com/fyne-io/gl-js v0.2.1-0.20260315212741-029c47fd27e8 // indirect
 	github.com/fyne-io/glfw-js v0.4.0 // indirect
@@ -35,6 +36,7 @@ require (
 	github.com/hack-pad/safejs v0.1.0 // indirect
 	github.com/hajimehoshi/go-mp3 v0.3.4 // indirect
 	github.com/icza/bitio v1.1.0 // indirect
+	github.com/jchv/go-winloader v0.0.0-20250406163304-c1995be93bd1 // indirect
 	github.com/jeandeaual/go-locale v0.0.0-20250612000132-0ef82f21eade // indirect
 	github.com/jfreymuth/oggvorbis v1.0.5 // indirect
 	github.com/jfreymuth/vorbis v1.0.2 // indirect
