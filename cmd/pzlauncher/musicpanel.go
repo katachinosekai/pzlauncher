@@ -144,7 +144,7 @@ func (u *ui) musicCard() fyne.CanvasObject {
 		if c.Folder == "" {
 			folder.SetText("Music folder: none chosen")
 		} else {
-			folder.SetText("Music folder: " + c.Folder)
+			folder.SetText("Music folder: " + shortPath(c.Folder))
 		}
 		playing := launcherMusic.Playing()
 		if playing {
@@ -208,15 +208,13 @@ func (u *ui) musicCard() fyne.CanvasObject {
 	}
 	musicState.refresh()
 
-	note := widget.NewLabel("Uses your own music files (mp3, ogg, wav, flac) from the folder you choose, including subfolders. Music pauses while Project Zomboid is running.")
-	note.Wrapping = fyne.TextWrapWord
-	note.Importance = widget.LowImportance
+	note := newMuted("Uses your own music files (mp3, ogg, wav, flac) from the folder you choose, including subfolders. Music pauses while Project Zomboid is running.", false)
 	volRow := container.NewBorder(nil, nil, widget.NewLabel("Volume"), volLabel, vol)
-	return widget.NewCard("Launcher music", "", container.NewVBox(
+	return settingsSection("Launcher music", "",
 		container.NewHBox(enable, shuffle),
 		container.NewBorder(nil, nil, nil, choose, folder),
 		volRow,
 		container.NewBorder(nil, nil, nil, container.NewHBox(pause, next), musicState.nowPlay),
-		note,
-	))
+		note.rt,
+	)
 }

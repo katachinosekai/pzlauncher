@@ -3,23 +3,93 @@ package main
 import (
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
 	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
+	"fyne.io/fyne/v2/layout"
+	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
 	"github.com/kata/pzlauncher/internal/gamecfg"
 )
 
 var flagHelp = map[string]string{
-	"-XX:+UseCompactObjectHeaders":      "smaller Java objects",
-	"-XX:+UseStringDeduplication":       "shares identical text in memory",
-	"-XX:+UnlockExperimentalVMOptions":  "needed by the Shenandoah delay below",
-	"-XX:ShenandoahUncommitDelay=30000": "gives memory back faster (Shenandoah GC)",
-	"-XX:ZUncommitDelay=30":             "gives memory back faster (ZGC)",
+	"-XX:+UseCompactObjectHeaders":      "Smaller Java objects",
+	"-XX:+UseStringDeduplication":       "Share identical text in memory",
+	"-XX:+UnlockExperimentalVMOptions":  "Allow experimental options (needed by the Shenandoah delay below)",
+	"-XX:ShenandoahUncommitDelay=30000": "Give unused memory back faster (Shenandoah)",
+	"-XX:ZUncommitDelay=30":             "Give unused memory back faster (ZGC)",
+}
+
+const softMaxPrefix = "-XX:SoftMaxHeapSize="
+
+type mutedText struct {
+	rt  *widget.RichText
+	seg *widget.TextSegment
+}
+
+func newMuted(s string, small bool) *mutedText {
+	seg := &widget.TextSegment{Text: s, Style: widget.RichTextStyle{ColorName: theme.ColorNamePlaceHolder}}
+	if small {
+		seg.Style.SizeName = theme.SizeNameCaptionText
+	}
+	rt := widget.NewRichText(seg)
+	rt.Wrapping = fyne.TextWrapWord
+	return &mutedText{rt: rt, seg: seg}
+}
+
+func (m *mutedText) SetText(s string) {
+	m.seg.Text = s
+	m.rt.Refresh()
+}
+
+func settingsSection(title, sub string, objs ...fyne.CanvasObject) fyne.CanvasObject {
+	bg := canvas.NewRectangle(theme.Color(theme.ColorNameInputBackground))
+	bg.CornerRadius = 10
+	head := widget.NewLabel(title)
+	head.TextStyle = fyne.TextStyle{Bold: true}
+	head.SizeName = theme.SizeNameSubHeadingText
+	items := []fyne.CanvasObject{head}
+	if sub != "" {
+		items = append(items, tighten(newMuted(sub, false).rt))
+	}
+	items = append(items, objs...)
+	inner := container.New(layout.NewCustomPaddedLayout(4, 10, 8, 8), container.NewVBox(items...))
+	return container.New(layout.NewCustomPaddedLayout(8, 8, 0, 0), container.NewStack(bg, inner))
+}
+
+func tighten(o fyne.CanvasObject) fyne.CanvasObject {
+	return container.New(layout.NewCustomPaddedLayout(-theme.Padding()*2, 0, 0, 0), o)
+}
+
+func subLine(o fyne.CanvasObject) fyne.CanvasObject {
+	return container.New(layout.NewCustomPaddedLayout(-theme.Padding()*3, 0, theme.IconInlineSize()+theme.InnerPadding(), 0), o)
+}
+
+func shortPath(p string) string {
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		if rel, err := filepath.Rel(home, p); err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			p = filepath.Join("~", rel)
+		}
+	}
+	r := []rune(p)
+	if len(r) > 80 {
+		p = string(r[:24]) + "…" + string(r[len(r)-55:])
+	}
+	return p
+}
+
+func memText(mb int) string {
+	if mb%1024 == 0 {
+		return fmt.Sprintf("%d GB", mb/1024)
+	}
+	return fmt.Sprintf("%.1f GB", float64(mb)/1024)
 }
 
 func gbLabel(gb int) string {
@@ -49,10 +119,15 @@ func (u *ui) settingsTab() fyne.CanvasObject {
 	if ramMB > 0 {
 		ramText = fmt.Sprintf("System RAM: %.1f GB", float64(ramMB)/1024)
 	}
-	ramLabel := widget.NewLabel(ramText + fmt.Sprintf(". Choose %d-%d GB; 8 GB (the pack's 8192m) is recommended for big modpacks.", lo, hi))
-	ramLabel.Wrapping = fyne.TextWrapWord
+	ramLabel := newMuted(ramText+fmt.Sprintf(" · choose %d-%d GB · 8 GB (the pack's 8192m) is recommended for big modpacks", lo, hi), false)
 	curLabel := widget.NewLabel("")
+	curLabel.TextStyle = fyne.TextStyle{Bold: true}
 	curLabel.Wrapping = fyne.TextWrapWord
+	curDetail := newMuted("", true)
+	jsonName := widget.NewLabel("Game file: ProjectZomboid64.json")
+	jsonPath := newMuted("", true)
+	openJSON := widget.NewButtonWithIcon("Open folder", theme.FolderOpenIcon(), func() { u.openFolder(filepath.Dir(env.JSONPath())) })
+	jsonRow := container.NewBorder(nil, nil, nil, container.NewCenter(openJSON), container.NewVBox(jsonName, tighten(jsonPath.rt)))
 
 	var xmxOpts []string
 	xmxVal := map[string]int{}
@@ -63,19 +138,19 @@ func (u *ui) settingsTab() fyne.CanvasObject {
 	}
 	xmxSel := widget.NewSelect(xmxOpts, nil)
 
-	softLabel := widget.NewLabel("")
+	softLabel := newMuted(strings.TrimSuffix(softMaxPrefix, "="), true)
 	flagChecks := map[string]*widget.Check{}
 	flagBox := container.NewVBox()
 	for _, f := range gamecfg.PackFlags() {
-		text := f
-		if strings.HasPrefix(f, "-XX:SoftMaxHeapSize=") {
-			text = "-XX:SoftMaxHeapSize (keeps the heap small; set below the memory limit)"
+		text, raw := f, newMuted(f, true)
+		if strings.HasPrefix(f, softMaxPrefix) {
+			text, raw = "Keep the heap small (soft limit, set below the memory limit)", softLabel
 		} else if h := flagHelp[f]; h != "" {
-			text += " - " + h
+			text = h
 		}
 		c := widget.NewCheck(text, nil)
 		flagChecks[f] = c
-		flagBox.Add(c)
+		flagBox.Add(container.NewVBox(c, subLine(raw.rt)))
 	}
 	argsLabel := widget.NewLabel("")
 	argsLabel.TextStyle = fyne.TextStyle{Monospace: true}
@@ -86,23 +161,29 @@ func (u *ui) settingsTab() fyne.CanvasObject {
 
 	loadJVM := func() {
 		jvmOK = false
+		curDetail.SetText("")
 		if env.GameDir == "" {
 			curLabel.SetText("Project Zomboid install not found.")
+			jsonRow.Hide()
 			argsLabel.SetText("")
 			return
 		}
+		jsonPath.SetText(shortPath(env.JSONPath()))
+		jsonRow.Show()
 		i, err := env.LoadJVM()
 		if err != nil {
-			curLabel.SetText("Could not read " + env.JSONPath() + ": " + err.Error())
+			curLabel.SetText("Could not read ProjectZomboid64.json")
+			curDetail.SetText(err.Error())
 			argsLabel.SetText("")
 			return
 		}
 		info, jvmOK = i, true
-		cur := "none (Java default)"
+		cur := "Java default"
 		if i.Xmx != "" {
-			cur = fmt.Sprintf("%s (%.1f GB)", i.Xmx, float64(i.XmxMB)/1024)
+			cur = memText(i.XmxMB)
+			curDetail.SetText("Set in the game file as " + i.Xmx)
 		}
-		curLabel.SetText("Current memory: " + cur + "  |  GC: " + i.GC + "\n" + env.JSONPath())
+		curLabel.SetText("Memory: " + cur + "  ·  Garbage collector: " + i.GC)
 		sel := ""
 		if i.XmxMB > 0 && i.XmxMB%1024 == 0 {
 			if l := gbLabel(i.XmxMB / 1024); xmxVal[l] != 0 {
@@ -121,9 +202,9 @@ func (u *ui) settingsTab() fyne.CanvasObject {
 			c.SetChecked(i.Flags[f])
 		}
 		if i.SoftMax != "" {
-			softLabel.SetText("SoftMaxHeapSize now: " + strings.TrimPrefix(i.SoftMax, "-XX:SoftMaxHeapSize="))
+			softLabel.SetText(i.SoftMax)
 		} else {
-			softLabel.SetText("")
+			softLabel.SetText(strings.TrimSuffix(softMaxPrefix, "="))
 		}
 		argsLabel.SetText(strings.Join(i.Args, "\n"))
 	}
@@ -176,14 +257,15 @@ func (u *ui) settingsTab() fyne.CanvasObject {
 		}
 		status.SetText(msg)
 	})
-	updNote := widget.NewLabel("A Steam game update can reset ProjectZomboid64.json. Your last saved memory settings are remembered; use the button to put them back.")
-	updNote.Wrapping = fyne.TextWrapWord
-	updNote.Importance = widget.LowImportance
+	updNote := newMuted("A Steam game update can reset ProjectZomboid64.json. Your last saved memory settings are remembered; use \"Re-apply\" to put them back.", false)
 
-	memCard := widget.NewCard("Memory", "", container.NewVBox(ramLabel, curLabel, xmxSel))
-	javaCard := widget.NewCard("Java options", "Memory-saving flags from the pack; other entries are never changed",
-		container.NewVBox(flagBox, softLabel, widget.NewAccordion(widget.NewAccordionItem("All Java options (read-only)", argsLabel)),
-			container.NewHBox(saveJVM, reapply), updNote))
+	memCard := settingsSection("Memory", "",
+		curLabel, tighten(curDetail.rt),
+		container.NewBorder(nil, nil, widget.NewLabel("Memory limit"), nil, xmxSel),
+		ramLabel.rt, jsonRow)
+	javaCard := settingsSection("Java options", "Memory-saving options from the pack. Other entries in the game file are never changed.",
+		flagBox, widget.NewAccordion(widget.NewAccordionItem("All Java options (read-only)", argsLabel)),
+		container.NewHBox(saveJVM, reapply), updNote.rt)
 
 	modeSel := widget.NewSelect([]string{gamecfg.ModeFullscreen, gamecfg.ModeBorderless, gamecfg.ModeWindowed}, nil)
 	widthE := widget.NewEntry()
@@ -206,28 +288,37 @@ func (u *ui) settingsTab() fyne.CanvasObject {
 		volBox.Add(row)
 	}
 	modeRow := widget.NewFormItem("Display mode", modeSel)
-	resRow := widget.NewFormItem("Resolution", container.NewGridWithColumns(3, widthE, widget.NewLabel("x"), heightE))
+	resRow := widget.NewFormItem("Resolution", container.NewGridWithColumns(2, container.NewBorder(nil, nil, nil, widget.NewLabel("x"), widthE), heightE))
 	fpsRow := widget.NewFormItem("Frame-rate limit", fpsSel)
 	fontRow := widget.NewFormItem("UI font size", fontSel)
 	form := widget.NewForm(modeRow, resRow, fpsRow, fontRow)
-	optPath := widget.NewLabel("")
-	optPath.Importance = widget.LowImportance
+	optPath := newMuted("", true)
+	optErr := newMuted("", false)
+	optName := widget.NewLabel("Game file: options.ini")
+	openOpts := widget.NewButtonWithIcon("Open folder", theme.FolderOpenIcon(), func() { u.openFolder(filepath.Dir(env.OptionsPath())) })
+	optRow := container.NewBorder(nil, nil, nil, container.NewCenter(openOpts), container.NewVBox(optName, tighten(optPath.rt)))
 
 	var gopts gamecfg.GameOptions
 	optsOK := false
 	loadOpts := func() {
 		optsOK = false
+		optErr.SetText("")
+		optErr.rt.Hide()
 		if env.ZomboidDir == "" {
-			optPath.SetText("Zomboid folder not found.")
+			optErr.SetText("Zomboid folder not found.")
+			optErr.rt.Show()
+			optRow.Hide()
 			return
 		}
+		optRow.Show()
+		optPath.SetText(shortPath(env.OptionsPath()))
 		_, o, err := env.LoadOptions()
 		if err != nil {
-			optPath.SetText("Could not read " + env.OptionsPath() + ": " + err.Error() + " (start the game once to create it)")
+			optErr.SetText("Could not read options.ini: " + err.Error() + " (start the game once to create it)")
+			optErr.rt.Show()
 			return
 		}
 		gopts, optsOK = o, true
-		optPath.SetText(env.OptionsPath())
 		modeSel.SetSelected(o.Mode)
 		widthE.SetText(strconv.Itoa(o.Width))
 		heightE.SetText(strconv.Itoa(o.Height))
@@ -316,8 +407,8 @@ func (u *ui) settingsTab() fyne.CanvasObject {
 		}
 	})
 	saveOpts.Importance = widget.HighImportance
-	gameCard := widget.NewCard("Game options", "From options.ini; every other line is kept as is",
-		container.NewVBox(form, vsync, volBox, optPath, saveOpts))
+	gameCard := settingsSection("Game options", "Read from the game's options.ini. Every other line in the file is kept as is.",
+		form, vsync, volBox, optErr.rt, optRow, container.NewHBox(saveOpts))
 
 	debugCheck := widget.NewCheck("Launch with debug mode", nil)
 	if on, err := env.Debug(); err == nil {
@@ -334,18 +425,15 @@ func (u *ui) settingsTab() fyne.CanvasObject {
 			status.SetText("Debug mode off.")
 		}
 	}
-	debugNote := widget.NewLabel("Needs ZombieBuddy and the launcher's helper mod")
-	debugNote.Importance = widget.LowImportance
-	debugCard := widget.NewCard("Debug", "", container.NewVBox(debugCheck, debugNote))
+	debugNote := newMuted("Needs ZombieBuddy and the launcher's helper mod.", true)
+	debugCard := settingsSection("Debug", "", debugCheck, subLine(debugNote.rt))
 
 	reload := widget.NewButton("Reload", func() {
 		loadJVM()
 		loadOpts()
 		status.SetText("Reloaded.")
 	})
-	safety := widget.NewLabel("Settings can only be saved while the game is closed. Each file is backed up once a day before the first change (<file>.launcher-bak-YYYYMMDD).")
-	safety.Wrapping = fyne.TextWrapWord
-	safety.Importance = widget.LowImportance
+	safety := newMuted("Settings can only be saved while the game is closed. Each file is backed up once a day before the first change (<file>.launcher-bak-YYYYMMDD).", false)
 
 	loadJVM()
 	loadOpts()
@@ -357,6 +445,6 @@ func (u *ui) settingsTab() fyne.CanvasObject {
 		status.SetText(strings.Join(msgs, "\n"))
 	}
 
-	body := container.NewVBox(memCard, javaCard, gameCard, debugCard, u.musicCard(), safety)
+	body := container.New(layout.NewCustomPaddedLayout(0, 24, 0, 6), container.NewVBox(memCard, javaCard, gameCard, debugCard, u.musicCard(), safety.rt))
 	return container.NewBorder(container.NewBorder(nil, nil, nil, reload, status), nil, nil, nil, container.NewVScroll(body))
 }
