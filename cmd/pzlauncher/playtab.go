@@ -500,7 +500,7 @@ func (u *ui) playTab() fyne.CanvasObject {
 		saveList.Refresh()
 		serverList.Refresh()
 		if err == nil && serr == nil {
-			status.SetText(fmt.Sprintf("%d saves, %d saved server accounts. Pick one and press Launch.", len(saves), len(servers)))
+			status.SetText(fmt.Sprintf("%s, %s. Pick one and press Launch.", plural(len(saves), "save", "saves"), plural(len(servers), "saved server account", "saved server accounts")))
 		}
 		fitSaves()
 		go runSaveChecks(append([]play.Save(nil), saves...))
@@ -682,4 +682,11 @@ func (u *ui) playTab() fyne.CanvasObject {
 	lists := container.NewBorder(container.NewVBox(savesBox, detailsBox), nil, nil, nil, serversBox)
 	bottom := container.NewVBox(statusScroll, container.NewHBox(launch, nickBtn, detailsBtn, refreshBtn))
 	return container.NewBorder(nil, bottom, nil, nil, lists)
+}
+
+func plural(n int, one, many string) string {
+	if n == 1 {
+		return "1 " + one
+	}
+	return fmt.Sprintf("%d %s", n, many)
 }

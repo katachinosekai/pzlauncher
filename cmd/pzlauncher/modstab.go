@@ -359,25 +359,27 @@ func (t *modsTab) createRow() fyne.CanvasObject {
 	name.Truncation = fyne.TextTruncateEllipsis
 	info := widget.NewLabel("")
 	info.Importance = widget.LowImportance
-	c := container.NewBorder(nil, nil, container.NewHBox(check, icon), info, name)
-	return c
+	info.SizeName = theme.SizeNameCaptionText
+	info.Truncation = fyne.TextTruncateEllipsis
+	text := container.New(layout.NewCustomPaddedVBoxLayout(-12), name, info)
+	return container.NewBorder(nil, nil, container.NewHBox(check, icon), nil, text)
 }
 
 func rowParts(o fyne.CanvasObject) modRow {
 	c := o.(*fyne.Container)
 	var r modRow
 	for _, obj := range c.Objects {
-		switch v := obj.(type) {
-		case *widget.Label:
-			if r.name == nil {
-				r.name = v
-			} else {
-				r.info = v
-			}
-		case *fyne.Container:
-			r.check = v.Objects[0].(*widget.Check)
-			r.icon = v.Objects[1].(*canvas.Image)
+		v, ok := obj.(*fyne.Container)
+		if !ok {
+			continue
 		}
+		if chk, ok := v.Objects[0].(*widget.Check); ok {
+			r.check = chk
+			r.icon = v.Objects[1].(*canvas.Image)
+			continue
+		}
+		r.name = v.Objects[0].(*widget.Label)
+		r.info = v.Objects[1].(*widget.Label)
 	}
 	return r
 }
