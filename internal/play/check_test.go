@@ -550,7 +550,7 @@ func TestAutoLoadSaveNotEnabled(t *testing.T) {
 	f := newSaveFixture(t, enabledDefaults)
 	os.RemoveAll(filepath.Join(f.env.ZomboidDir, "mods", "ZombieBuddy"))
 	r := f.checker().CheckSave(f.save("Sandbox", "w", 251, "Muldraugh, KY", ""))
-	if !strings.Contains(issues(r, SevError), "enabled but a required mod") {
+	if !strings.Contains(issues(r, SevError), "enabled but required mod ZombieBuddy is not installed") {
 		t.Errorf("AutoLoadSave without ZombieBuddy: %s", r.Text())
 	}
 }

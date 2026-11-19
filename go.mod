@@ -5,6 +5,7 @@ go 1.26.0
 require (
 	fyne.io/fyne/v2 v2.8.2
 	github.com/gopxl/beep/v2 v2.1.1
+	github.com/jfreymuth/pulse v0.1.3
 	golang.org/x/sys v0.50.0
 	modernc.org/sqlite v1.62.0
 )

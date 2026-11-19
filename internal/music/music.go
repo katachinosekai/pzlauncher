@@ -10,13 +10,11 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/gopxl/beep/v2"
 	"github.com/gopxl/beep/v2/effects"
 	"github.com/gopxl/beep/v2/flac"
 	"github.com/gopxl/beep/v2/mp3"
-	"github.com/gopxl/beep/v2/speaker"
 	"github.com/gopxl/beep/v2/vorbis"
 	"github.com/gopxl/beep/v2/wav"
 )
@@ -115,14 +113,6 @@ func decode(path string) (beep.StreamSeekCloser, beep.Format, error) {
 }
 
 const sampleRate = beep.SampleRate(44100)
-
-var initOnce sync.Once
-var initErr error
-
-func initSpeaker() error {
-	initOnce.Do(func() { initErr = speaker.Init(sampleRate, sampleRate.N(time.Second/10)) })
-	return initErr
-}
 
 type playlist struct {
 	p       *Player
@@ -223,7 +213,7 @@ func (p *Player) Start(folder string, shuffle bool, volume int) error {
 	if len(tracks) == 0 {
 		return ErrNoMusic
 	}
-	if err := initSpeaker(); err != nil {
+	if err := initOutput(); err != nil {
 		return err
 	}
 	p.Stop()
@@ -243,7 +233,7 @@ func (p *Player) Start(folder string, shuffle bool, volume int) error {
 	p.userPaused = false
 	ctrl.Paused = p.gamePaused
 	p.mu.Unlock()
-	speaker.Play(vol)
+	setStream(vol)
 	return nil
 }
 
@@ -253,7 +243,7 @@ func (p *Player) Stop() {
 	p.pl, p.ctrl, p.vol = nil, nil, nil
 	p.mu.Unlock()
 	if running {
-		speaker.Clear()
+		setStream(nil)
 	}
 }
 
@@ -267,9 +257,9 @@ func (p *Player) apply() {
 	if p.ctrl == nil {
 		return
 	}
-	speaker.Lock()
+	lockOut()
 	p.ctrl.Paused = p.userPaused || p.gamePaused
-	speaker.Unlock()
+	unlockOut()
 }
 
 func (p *Player) SetPaused(paused bool) {
@@ -299,9 +289,9 @@ func (p *Player) SetVolume(v int) {
 		return
 	}
 	level, silent := volumeLevel(min(max(v, 0), 100))
-	speaker.Lock()
+	lockOut()
 	p.vol.Volume, p.vol.Silent = level, silent
-	speaker.Unlock()
+	unlockOut()
 }
 
 func (p *Player) Next() {
@@ -310,7 +300,7 @@ func (p *Player) Next() {
 	if p.pl == nil {
 		return
 	}
-	speaker.Lock()
+	lockOut()
 	p.pl.skip = true
-	speaker.Unlock()
+	unlockOut()
 }

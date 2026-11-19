@@ -9,7 +9,7 @@ import (
 	"fyne.io/fyne/v2/widget"
 )
 
-const disclaimer = "Unofficial fan tool. Not affiliated with or endorsed by The Indie Stone."
+const disclaimer = "Unofficial fan tool, not affiliated with The Indie Stone"
 
 const creditsText = `## Unofficial fan tool
 

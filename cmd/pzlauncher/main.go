@@ -10,7 +10,6 @@ import (
 	"fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
-	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/widget"
 
 	"github.com/kata/pzlauncher/internal/update"
@@ -92,9 +91,9 @@ func (u *ui) aboutBar() fyne.CanvasObject {
 		}()
 	})
 	note := widget.NewLabel(disclaimer)
-	note.Importance = widget.LowImportance
+	note.Truncation = fyne.TextTruncateEllipsis
 	about := widget.NewButton("About & credits", u.showAbout)
-	return container.NewVBox(note, container.NewHBox(label, layout.NewSpacer(), about, btn))
+	return container.NewBorder(nil, nil, label, container.NewHBox(about, btn), note)
 }
 
 func (u *ui) selfUpdate(rel *update.Release, label *widget.Label) {

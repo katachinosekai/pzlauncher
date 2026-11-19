@@ -154,7 +154,7 @@ func (t *modsTab) savePrefs() {
 
 func (t *modsTab) build() {
 	t.search = widget.NewEntry()
-	t.search.SetPlaceHolder("Search name, mod ID, Workshop ID or URL")
+	t.search.SetPlaceHolder("Search name, ID, Workshop ID or link")
 	t.search.OnChanged = func(string) { t.refreshList() }
 
 	var filters, sorts []string
@@ -188,8 +188,9 @@ func (t *modsTab) build() {
 		}
 	}
 
-	filterRow := container.NewBorder(nil, nil, nil, container.NewHBox(t.filterSel, t.sortSel), t.search)
-	left := container.NewBorder(container.NewVBox(filterRow, t.count), nil, nil, nil, t.list)
+	t.search.Scroll = container.ScrollNone
+	filterRow := container.NewGridWithColumns(2, t.filterSel, t.sortSel)
+	left := container.NewBorder(container.NewVBox(t.search, filterRow, t.count), nil, nil, nil, t.list)
 
 	t.details = container.NewVBox(widget.NewLabel("Select a mod to see its details."))
 	detailsScroll := container.NewVScroll(t.details)

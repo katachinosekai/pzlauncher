@@ -185,8 +185,11 @@ func (x *Index) Unavailable(id string) string {
 	if x.avail[id] {
 		return ""
 	}
-	if !m.AvailableSelf(x.Game) {
-		return "needs game version " + m.VersionRange() + " (game is " + x.Game.String() + ")"
+	if m.VersionMin != nil && m.VersionMin.Int() > x.Game.Int() {
+		return "needs game " + m.VersionMin.String() + " or newer"
+	}
+	if m.VersionMax != nil && m.VersionMax.Int() < x.Game.Int() {
+		return "only for game " + m.VersionMax.String() + " or older"
 	}
 	for _, r := range m.Requires() {
 		rm := x.byID[r]
