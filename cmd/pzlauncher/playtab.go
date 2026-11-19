@@ -34,6 +34,30 @@ func (r serverRow) label() string {
 	return s
 }
 
+func rowParts(o fyne.CanvasObject) (name, info *widget.Label, img *canvas.Image) {
+	for _, c := range o.(*fyne.Container).Objects {
+		switch v := c.(type) {
+		case *canvas.Image:
+			img = v
+		case *widget.Label:
+			if name == nil {
+				name = v
+			} else {
+				info = v
+			}
+		case *fyne.Container:
+			if l, ok := v.Objects[0].(*widget.Label); ok {
+				if name == nil {
+					name = l
+				} else {
+					info = l
+				}
+			}
+		}
+	}
+	return name, info, img
+}
+
 func (u *ui) playTab() fyne.CanvasObject {
 	var (
 		saves   []play.Save
@@ -54,21 +78,25 @@ func (u *ui) playTab() fyne.CanvasObject {
 			img := canvas.NewImageFromResource(nil)
 			img.FillMode = canvas.ImageFillContain
 			img.SetMinSize(fyne.NewSize(64, 64))
-			return container.NewHBox(img, container.NewCenter(widget.NewLabel("")))
+			name := widget.NewLabel("")
+			name.Truncation = fyne.TextTruncateEllipsis
+			info := widget.NewLabel("")
+			return container.NewBorder(nil, nil, img, container.NewCenter(info), container.NewCenter(name))
 		},
 		func(id widget.ListItemID, o fyne.CanvasObject) {
-			row := o.(*fyne.Container)
-			img := row.Objects[0].(*canvas.Image)
-			l := row.Objects[1].(*fyne.Container).Objects[0].(*widget.Label)
+			name, info, img := rowParts(o)
 			thumb := ""
 			if id == 0 {
-				l.SetText("Continue latest save")
+				name.SetText("Continue latest save")
+				info.SetText("")
 				if len(saves) > 0 {
 					thumb = saves[0].Thumb()
+					info.SetText(saves[0].Modified.Format("2006-01-02 15:04"))
 				}
 			} else {
 				s := saves[id-1]
-				l.SetText(fmt.Sprintf("%s    %s", nicks.Display(s), s.Modified.Format("2006-01-02 15:04")))
+				name.SetText(nicks.Display(s))
+				info.SetText(s.Modified.Format("2006-01-02 15:04"))
 				thumb = s.Thumb()
 			}
 			img.File = thumb
@@ -81,7 +109,11 @@ func (u *ui) playTab() fyne.CanvasObject {
 	)
 	serverList := widget.NewList(
 		func() int { return len(servers) },
-		func() fyne.CanvasObject { return widget.NewLabel("server\nstatus") },
+		func() fyne.CanvasObject {
+			name := widget.NewLabel("")
+			name.Truncation = fyne.TextTruncateEllipsis
+			return container.NewBorder(nil, nil, nil, widget.NewLabel(""), name)
+		},
 		func(id widget.ListItemID, o fyne.CanvasObject) {
 			r := servers[id]
 			statMu.Lock()
@@ -91,7 +123,9 @@ func (u *ui) playTab() fyne.CanvasObject {
 			if ok {
 				text = st.String()
 			}
-			o.(*widget.Label).SetText(r.label() + "\n" + text)
+			name, info, _ := rowParts(o)
+			name.SetText(r.label())
+			info.SetText(text)
 		},
 	)
 
