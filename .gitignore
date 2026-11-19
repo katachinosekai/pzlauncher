@@ -2,3 +2,4 @@
 /fyne-cross/
 *.exe
 *.AppImage
+.shots/

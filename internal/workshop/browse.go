@@ -100,7 +100,7 @@ type BrowseResult struct {
 
 var ssrData = regexp.MustCompile(`(?s)<script[^>]*\bid="valve-ssr-data"[^>]*>(.*?)</script>`)
 
-var ErrBrowseFormat = errors.New("Steam's Workshop page layout changed; open the search in the browser instead")
+var ErrBrowseFormat = errors.New("Steam's Workshop page layout changed; use \"Open in browser\" instead")
 
 func ParseBrowsePage(page []byte) (*BrowseResult, error) {
 	m := ssrData.FindSubmatch(page)

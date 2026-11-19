@@ -14,6 +14,7 @@ import (
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
+	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
@@ -60,7 +61,15 @@ type wsItem struct {
 	Info       string
 	State      string
 	Subscribed bool
+	Installed  bool
 	Preview    string
+}
+
+func (it wsItem) displayTitle() string {
+	if it.Title == "" {
+		return "Workshop item " + it.ID
+	}
+	return it.Title
 }
 
 type wsBrowser struct {
@@ -191,9 +200,11 @@ func (b *wsBrowser) toggle(it wsItem) {
 
 type wsRow struct {
 	widget.BaseWidget
+	card    *tapCard
 	img     *canvas.Image
 	title   *widget.Label
 	info    *widget.Label
+	dot     *canvas.Circle
 	btn     *widget.Button
 	ext     *widget.Button
 	preview string
@@ -201,48 +212,72 @@ type wsRow struct {
 }
 
 func newWSRow() *wsRow {
-	r := &wsRow{}
-	r.img = canvas.NewImageFromImage(nil)
+	r := &wsRow{
+		img:   canvas.NewImageFromImage(nil),
+		title: widget.NewLabel(""),
+		info:  widget.NewLabel(""),
+		dot:   canvas.NewCircle(theme.Color(theme.ColorNameDisabled)),
+		btn:   widget.NewButton("Subscribe", nil),
+		ext:   widget.NewButtonWithIcon("", theme.ComputerIcon(), nil),
+	}
+	bg := canvas.NewRectangle(theme.Color(theme.ColorNameInputBackground))
+	bg.CornerRadius = 10
+	thumbBg := canvas.NewRectangle(color.NRGBA{128, 128, 128, 40})
+	thumbBg.CornerRadius = 8
 	r.img.FillMode = canvas.ImageFillContain
+	r.img.CornerRadius = 8
 	r.img.SetMinSize(fyne.NewSize(64, 64))
-	bg := canvas.NewRectangle(color.NRGBA{128, 128, 128, 40})
-	bg.CornerRadius = 4
-	r.title = widget.NewLabel("")
-	r.title.TextStyle.Bold = true
 	r.title.Truncation = fyne.TextTruncateEllipsis
-	r.info = widget.NewLabel("")
 	r.info.Truncation = fyne.TextTruncateEllipsis
+	r.info.Alignment = fyne.TextAlignTrailing
 	r.info.Importance = widget.LowImportance
-	r.btn = widget.NewButton("Subscribe", nil)
-	r.ext = widget.NewButtonWithIcon("", theme.ComputerIcon(), nil)
-	text := container.New(&tightVBox{}, r.title, r.info)
-	r.content = container.NewBorder(nil, nil, container.NewStack(bg, r.img), container.NewCenter(container.NewHBox(r.btn, r.ext)), text)
+	r.info.SizeName = theme.SizeNameCaptionText
+	dotBox := container.New(layout.NewCustomPaddedLayout(0, 0, 6, 8), container.NewCenter(container.NewGridWrap(fyne.NewSize(12, 12), r.dot)))
+	text := container.NewGridWithColumns(2,
+		container.NewVBox(layout.NewSpacer(), r.title, layout.NewSpacer()),
+		container.NewBorder(nil, nil, nil, dotBox, container.NewVBox(layout.NewSpacer(), r.info, layout.NewSpacer())),
+	)
+	right := container.NewCenter(container.NewHBox(r.btn, r.ext))
+	inner := container.New(layout.NewCustomPaddedLayout(4, 4, 4, 4), container.NewBorder(nil, nil, container.NewStack(thumbBg, r.img), right, text))
+	r.card = newTapCard(container.NewStack(bg, inner))
+	r.content = container.New(layout.NewCustomPaddedLayout(3, 3, 0, 0), r.card)
 	r.ExtendBaseWidget(r)
 	return r
 }
 
 func (r *wsRow) CreateRenderer() fyne.WidgetRenderer { return widget.NewSimpleRenderer(r.content) }
 
-type tightVBox struct{}
-
-func (tightVBox) MinSize(objs []fyne.CanvasObject) fyne.Size {
-	var s fyne.Size
-	for _, o := range objs {
-		m := o.MinSize()
-		s.Width = max(s.Width, m.Width)
-		s.Height += m.Height - 8
+func wsDotColor(busy, subscribed, installed bool) color.Color {
+	switch {
+	case busy:
+		return theme.Color(theme.ColorNameWarning)
+	case !subscribed:
+		return theme.Color(theme.ColorNameDisabled)
+	case installed:
+		return theme.Color(theme.ColorNameSuccess)
+	default:
+		return theme.Color(theme.ColorNameWarning)
 	}
-	return s
 }
 
-func (tightVBox) Layout(objs []fyne.CanvasObject, size fyne.Size) {
-	y := (size.Height - tightVBox{}.MinSize(objs).Height) / 2
-	for _, o := range objs {
-		h := o.MinSize().Height
-		o.Move(fyne.NewPos(0, y-4))
-		o.Resize(fyne.NewSize(size.Width, h))
-		y += h - 8
+func (b *wsBrowser) showMenu(it wsItem, e *fyne.PointEvent) {
+	label := "Subscribe"
+	if b.subscribed(it) {
+		label = "Unsubscribe"
 	}
+	sub := fyne.NewMenuItem(label, func() { b.toggle(it) })
+	sub.Disabled = b.busy[it.ID]
+	link := workshop.ItemURL(it.ID)
+	menu := fyne.NewMenu("",
+		sub,
+		fyne.NewMenuItemSeparator(),
+		fyne.NewMenuItem("Open in browser", func() { b.openExternal(link) }),
+		fyne.NewMenuItem("Copy link", func() {
+			b.u.app.Clipboard().SetContent(link)
+			b.status.SetText("Copied the link to " + it.displayTitle() + ".")
+		}),
+	)
+	widget.ShowPopUpMenuAtPosition(menu, b.u.win.Canvas(), e.AbsolutePosition)
 }
 
 func (b *wsBrowser) itemList(items *[]wsItem) *widget.List {
@@ -256,22 +291,22 @@ func (b *wsBrowser) itemList(items *[]wsItem) *widget.List {
 			}
 			it := (*items)[i]
 			r := o.(*wsRow)
-			title := it.Title
-			if title == "" {
-				title = "Workshop item " + it.ID
-			}
-			r.title.SetText(title)
+			r.title.SetText(it.displayTitle())
 			info := it.Info
 			if it.State != "" {
 				info = strings.ToUpper(it.State) + "  ·  " + info
 			}
 			r.info.SetText(info)
+			busy := b.busy[it.ID]
+			sub := b.subscribed(it)
+			r.dot.FillColor = wsDotColor(busy, sub, it.Installed)
+			r.dot.Refresh()
 			switch {
-			case b.busy[it.ID]:
+			case busy:
 				r.btn.SetText("Working...")
 				r.btn.Importance = widget.MediumImportance
 				r.btn.Disable()
-			case b.subscribed(it):
+			case sub:
 				r.btn.SetText("Unsubscribe")
 				r.btn.Importance = widget.MediumImportance
 				r.btn.Enable()
@@ -284,6 +319,7 @@ func (b *wsBrowser) itemList(items *[]wsItem) *widget.List {
 			r.btn.OnTapped = func() { b.toggle(it) }
 			id := it.ID
 			r.ext.OnTapped = func() { b.openExternal(workshop.ItemURL(id)) }
+			r.card.onMenu = func(e *fyne.PointEvent) { b.showMenu(it, e) }
 			r.preview = it.Preview
 			preview := it.Preview
 			im := b.thumbs.Get(b.u.ctx, preview, func(im image.Image) {
@@ -298,6 +334,7 @@ func (b *wsBrowser) itemList(items *[]wsItem) *widget.List {
 			r.img.Refresh()
 		},
 	)
+	list.HideSeparators = true
 	list.OnSelected = func(widget.ListItemID) { list.UnselectAll() }
 	b.watch(list.Refresh)
 	return list
@@ -379,7 +416,7 @@ func (b *wsBrowser) browseView(controls fyne.CanvasObject, query func() workshop
 				}
 				more.Enable()
 				if err != nil {
-					status.SetText("Could not load the list: " + err.Error() + " (use \"Open in default browser\")")
+					status.SetText("Could not load the list: " + err.Error() + " (use \"Open in browser\")")
 					if reset {
 						items = nil
 						list.Refresh()
@@ -405,7 +442,7 @@ func (b *wsBrowser) browseView(controls fyne.CanvasObject, query func() workshop
 		}()
 	}
 	more.OnTapped = func() { load(false) }
-	openBrowse := widget.NewButtonWithIcon("Open in default browser", theme.ComputerIcon(), func() {
+	openBrowse := widget.NewButtonWithIcon("Open in browser", theme.ComputerIcon(), func() {
 		b.openExternal(workshop.BrowseURL("", query()))
 	})
 	top := container.NewVBox(container.NewBorder(nil, nil, nil, openBrowse, controls), status)
@@ -505,7 +542,7 @@ func (b *wsBrowser) subsTab() (fyne.CanvasObject, func()) {
 					if d.Title == "" && s.Size > 0 {
 						info = humanSize(s.Size)
 					}
-					items = append(items, wsItem{ID: s.ID, Title: d.Title, Info: info, State: subStateLabel(s.State), Subscribed: true, Preview: d.Preview})
+					items = append(items, wsItem{ID: s.ID, Title: d.Title, Info: info, State: subStateLabel(s.State), Subscribed: true, Installed: s.State == workshop.SubInstalled, Preview: d.Preview})
 				}
 				list.Refresh()
 				msg := fmt.Sprintf("%d subscribed: %d installed, %d update pending, %d downloading or queued.", len(subs), counts[workshop.SubInstalled], counts[workshop.SubNeedsUpdate], counts[workshop.SubDownloading])
@@ -651,7 +688,7 @@ func (b *wsBrowser) collectionTab() (fyne.CanvasObject, func()) {
 						continue
 					}
 					d := det[id]
-					installed = append(installed, wsItem{ID: id, Title: d.Title, Info: detailsInfo(d), State: "Installed", Subscribed: true, Preview: d.Preview})
+					installed = append(installed, wsItem{ID: id, Title: d.Title, Info: detailsInfo(d), State: "Installed", Subscribed: true, Installed: true, Preview: d.Preview})
 				}
 				sort.SliceStable(installed, func(i, j int) bool {
 					return strings.ToLower(installed[i].Title) < strings.ToLower(installed[j].Title)
@@ -690,7 +727,7 @@ func (b *wsBrowser) collectionTab() (fyne.CanvasObject, func()) {
 		}()
 	}
 	refresh = widget.NewButtonWithIcon("Refresh", theme.ViewRefreshIcon(), load)
-	openCol := widget.NewButtonWithIcon("Open in default browser", theme.ComputerIcon(), func() { b.openExternal(workshop.ItemURL(cid())) })
+	openCol := widget.NewButtonWithIcon("Open in browser", theme.ComputerIcon(), func() { b.openExternal(workshop.ItemURL(cid())) })
 	actions := container.NewHBox(subMissing, stop, openCol)
 	top := container.NewVBox(
 		container.NewBorder(nil, nil, widget.NewLabel("Collection id"), refresh, colEntry),
