@@ -11,6 +11,7 @@ import (
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
+	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
@@ -60,11 +61,14 @@ func rowParts(o fyne.CanvasObject) (name, info *widget.Label, img *canvas.Image)
 				info = v
 			}
 		case *fyne.Container:
-			if l, ok := v.Objects[0].(*widget.Label); ok {
-				if name == nil {
-					name = l
-				} else {
-					info = l
+			for _, inner := range v.Objects {
+				if l, ok := inner.(*widget.Label); ok {
+					if name == nil {
+						name = l
+					} else {
+						info = l
+					}
+					break
 				}
 			}
 		}
@@ -95,7 +99,8 @@ func (u *ui) playTab() fyne.CanvasObject {
 			name := widget.NewLabel("")
 			name.Truncation = fyne.TextTruncateEllipsis
 			info := widget.NewLabel("")
-			return container.NewBorder(nil, nil, img, container.NewCenter(info), container.NewCenter(name))
+			mid := container.NewVBox(layout.NewSpacer(), name, layout.NewSpacer())
+			return container.NewBorder(nil, nil, img, container.NewCenter(info), mid)
 		},
 		func(id widget.ListItemID, o fyne.CanvasObject) {
 			name, info, img := rowParts(o)
