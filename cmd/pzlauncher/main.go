@@ -45,12 +45,9 @@ func main() {
 	w := a.NewWindow("PZ Launcher")
 	u := &ui{app: a, win: w, ctx: ctx, client: update.NewClient()}
 
-	tabs := container.NewAppTabs(
-		container.NewTabItem("Play", u.playTab()),
-		container.NewTabItem("Install / Update", u.installTab()),
-	)
+	tabs := u.buildTabs()
 	w.SetContent(container.NewBorder(nil, u.aboutBar(), nil, nil, tabs))
-	w.Resize(fyne.NewSize(760, 560))
+	w.Resize(fyne.NewSize(900, 820))
 	w.SetOnClosed(cancel)
 	w.ShowAndRun()
 }
@@ -92,7 +89,10 @@ func (u *ui) aboutBar() fyne.CanvasObject {
 			})
 		}()
 	})
-	return container.NewHBox(label, layout.NewSpacer(), btn)
+	note := widget.NewLabel(disclaimer)
+	note.Importance = widget.LowImportance
+	about := widget.NewButton("About & credits", u.showAbout)
+	return container.NewVBox(note, container.NewHBox(label, layout.NewSpacer(), about, btn))
 }
 
 func (u *ui) selfUpdate(rel *update.Release, label *widget.Label) {

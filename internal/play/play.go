@@ -48,6 +48,8 @@ type Server struct {
 	IP       string
 	Port     int
 	Accounts []Account
+
+	ServerPasswordSaved bool
 }
 
 func (s Server) Addr() string { return fmt.Sprintf("%s:%d", s.IP, s.Port) }
@@ -67,6 +69,7 @@ type Target struct {
 	IP      string
 	Port    int
 	Account string
+	Debug   bool
 }
 
 func Latest() Target           { return Target{Kind: KindLatest} }
@@ -76,9 +79,11 @@ func ServerTarget(s Server, account string) Target {
 }
 
 type Env struct {
-	ZomboidDir string
-	OpenURL    func(string) error
-	Running    func() (bool, error)
+	ZomboidDir  string
+	GameDir     string
+	WorkshopDir string
+	OpenURL     func(string) error
+	Running     func() (bool, error)
 }
 
 func Default() (*Env, error) {
@@ -86,7 +91,12 @@ func Default() (*Env, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Env{ZomboidDir: z, OpenURL: openURL, Running: gameRunning}, nil
+	e := &Env{ZomboidDir: z, OpenURL: openURL, Running: gameRunning}
+	if root, err := paths.SteamRoot(); err == nil {
+		e.GameDir, _ = paths.GameDir(root)
+		e.WorkshopDir, _ = paths.WorkshopDir(root)
+	}
+	return e, nil
 }
 
 func ListSaves() ([]Save, error) {
@@ -136,7 +146,7 @@ func (e *Env) ListSaves() ([]Save, error) {
 			continue
 		}
 		for _, w := range worlds {
-			if !w.IsDir() || strings.ContainsAny(w.Name(), "\r\n") {
+			if !w.IsDir() || strings.HasPrefix(w.Name(), ".") || strings.ContainsAny(w.Name(), "\r\n") {
 				continue
 			}
 			dir := filepath.Join(modeDir, w.Name())
@@ -176,7 +186,7 @@ func (e *Env) ListServers() ([]Server, error) {
 		return nil, err
 	}
 	defer db.Close()
-	rows, err := db.Query(`SELECT s.id, s.name, s.ip, s.port, a.username, COALESCE(a.isSavePassword, 0)
+	rows, err := db.Query(`SELECT s.id, s.name, s.ip, s.port, COALESCE(length(s.serverPassword), 0) > 0, a.username, COALESCE(a.isSavePassword, 0)
 		FROM server s LEFT JOIN account a ON a.serverId = s.id
 		ORDER BY s.id, a.id`)
 	if err != nil {
@@ -191,17 +201,18 @@ func (e *Env) ListServers() ([]Server, error) {
 			name    string
 			ip      string
 			port    int
+			srvPwd  bool
 			user    sql.NullString
 			savePwd int64
 		)
-		if err := rows.Scan(&id, &name, &ip, &port, &user, &savePwd); err != nil {
+		if err := rows.Scan(&id, &name, &ip, &port, &srvPwd, &user, &savePwd); err != nil {
 			return nil, err
 		}
 		i, ok := idx[id]
 		if !ok {
 			i = len(servers)
 			idx[id] = i
-			servers = append(servers, Server{ID: id, Name: name, IP: ip, Port: port})
+			servers = append(servers, Server{ID: id, Name: name, IP: ip, Port: port, ServerPasswordSaved: srvPwd})
 		}
 		if user.Valid && user.String != "" {
 			servers[i].Accounts = append(servers[i].Accounts, Account{Username: user.String, PasswordSaved: savePwd != 0})
@@ -260,7 +271,10 @@ func (e *Env) Launch(t Target) error {
 		return err
 	}
 	files["AutoStart.txt"] = "1\n"
-	for _, name := range []string{"AutoConnect.txt", "AutoLoadSave.txt", "AutoStart.txt"} {
+	if t.Debug {
+		files["AutoDebug.txt"] = "1\n"
+	}
+	for _, name := range []string{"AutoConnect.txt", "AutoLoadSave.txt", "AutoStart.txt", "AutoDebug.txt"} {
 		if err := os.WriteFile(filepath.Join(e.luaDir(), name), []byte(files[name]), 0o644); err != nil {
 			return err
 		}
