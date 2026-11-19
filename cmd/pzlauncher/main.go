@@ -54,17 +54,17 @@ func main() {
 }
 
 func (u *ui) aboutBar() fyne.CanvasObject {
-	label := widget.NewLabel("PZ Launcher " + version)
+	label := widget.NewLabel("PZ Launcher")
 	var btn *widget.Button
 	btn = widget.NewButton("Check for launcher update", func() {
 		btn.Disable()
-		label.SetText("PZ Launcher " + version + " - checking...")
+		label.SetText("PZ Launcher - checking for updates...")
 		go func() {
 			defer fyne.Do(btn.Enable)
 			rel, err := u.client.Latest(u.ctx)
 			if err != nil {
 				fyne.Do(func() {
-					label.SetText("PZ Launcher " + version)
+					label.SetText("PZ Launcher")
 					dialog.ShowError(err, u.win)
 				})
 				return
@@ -72,16 +72,16 @@ func (u *ui) aboutBar() fyne.CanvasObject {
 			latest := rel.Manifest.LauncherVersion
 			if !update.LauncherOutdated(latest, version) {
 				fyne.Do(func() {
-					msg := "PZ Launcher " + version + " (up to date)"
+					msg := "PZ Launcher (up to date)"
 					if version == "dev" {
-						msg = "PZ Launcher dev build (latest release " + latest + ")"
+						msg = "PZ Launcher (latest release " + latest + ")"
 					}
 					label.SetText(msg)
 				})
 				return
 			}
 			fyne.Do(func() {
-				label.SetText("PZ Launcher " + version + " - " + latest + " available")
+				label.SetText("PZ Launcher - " + latest + " available")
 				dialog.ShowConfirm("Launcher update", fmt.Sprintf("Update the launcher from %s to %s?", version, latest), func(ok bool) {
 					if ok {
 						u.selfUpdate(rel, label)
@@ -105,7 +105,7 @@ func (u *ui) selfUpdate(rel *update.Release, label *widget.Label) {
 		})
 		fyne.Do(func() {
 			if err != nil {
-				label.SetText("PZ Launcher " + version)
+				label.SetText("PZ Launcher")
 				dialog.ShowError(err, u.win)
 				return
 			}

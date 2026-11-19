@@ -35,7 +35,7 @@ The mods installed through the pack come from the Steam Workshop and belong to t
 Made by **katachinosekai**.`
 
 func (u *ui) showAbout() {
-	text := widget.NewRichTextFromMarkdown(creditsText)
+	text := widget.NewRichTextFromMarkdown(creditsText + "\n\nVersion: " + version)
 	text.Wrapping = fyne.TextWrapWord
 	links := container.NewHBox()
 	for _, l := range []struct{ name, link string }{

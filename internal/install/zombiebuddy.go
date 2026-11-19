@@ -120,6 +120,11 @@ func (in *Installer) ZombieBuddy(ctx context.Context) error {
 			return err
 		}
 	}
+	if in.opts.RemoveZombieBuddy && !in.opts.SetupZombieBuddy && in.opts.GOOS != "windows" {
+		if err := in.zbRemoveZBBatchJSON(); err != nil {
+			return err
+		}
+	}
 	if in.zb.jarChanged {
 		in.say("  " + zbsetup.ReapproveNote)
 	}
@@ -197,5 +202,22 @@ func (in *Installer) zbLaunchOptions(ctx context.Context) error {
 			return err
 		}
 	}
+	return nil
+}
+
+func (in *Installer) zbRemoveZBBatchJSON() error {
+	t, err := readText(in.memoryJSON())
+	if err != nil || !HasZBBatchAgent(t) {
+		return nil
+	}
+	nt := RemoveZBBatchAgent(t)
+	if !jsonValid(nt) {
+		in.warn("could not remove -javaagent:ZBBatch.jar from ProjectZomboid64.json; remove it by hand, ZBBatch needs ZombieBuddy")
+		return nil
+	}
+	if err := in.writeGameJSON(nt); err != nil {
+		return err
+	}
+	in.change("  removed -javaagent:ZBBatch.jar from ProjectZomboid64.json (ZBBatch needs ZombieBuddy)")
 	return nil
 }

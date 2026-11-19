@@ -89,10 +89,17 @@ func TestZombieBuddySetupLinux(t *testing.T) {
 		t.Fatal("second run changed", r.Changes)
 	}
 
+	gameJSON := filepath.Join(tr.game, "ProjectZomboid64.json")
+	if err := os.WriteFile(gameJSON, []byte("{\n    \"vmArgs\": [\n        \"-Xmx8192m\",\n        \"-javaagent:ZBBatch.jar\"\n    ]\n}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	o.SetupZombieBuddy, o.RemoveZombieBuddy = false, true
 	r, err = ZombieBuddy(context.Background(), o)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(gameJSON); strings.Contains(string(b), "ZBBatch") || !strings.Contains(string(b), "-Xmx8192m") {
+		t.Fatalf("ZBBatch should leave ProjectZomboid64.json with ZombieBuddy:\n%s", b)
 	}
 	if got := strings.Join(launchValues(t, tr), "|"); got != "gamemoderun %command% -|-nosound" {
 		t.Fatal(got)
