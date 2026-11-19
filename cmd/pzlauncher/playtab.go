@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"image/color"
 	"sync"
 	"time"
 
@@ -32,6 +33,19 @@ func (r serverRow) label() string {
 		s += " - password not saved"
 	}
 	return s
+}
+
+func statusColor(st play.ServerStatus, known bool) color.Color {
+	switch {
+	case !known:
+		return theme.Color(theme.ColorNameDisabled)
+	case !st.Online:
+		return theme.Color(theme.ColorNameError)
+	case st.HasPlayers && st.MaxPlayers > 0 && st.Players >= st.MaxPlayers:
+		return theme.Color(theme.ColorNameWarning)
+	default:
+		return theme.Color(theme.ColorNameSuccess)
+	}
 }
 
 func rowParts(o fyne.CanvasObject) (name, info *widget.Label, img *canvas.Image) {
@@ -112,7 +126,10 @@ func (u *ui) playTab() fyne.CanvasObject {
 		func() fyne.CanvasObject {
 			name := widget.NewLabel("")
 			name.Truncation = fyne.TextTruncateEllipsis
-			return container.NewBorder(nil, nil, nil, widget.NewLabel(""), name)
+			dot := canvas.NewCircle(theme.Color(theme.ColorNameDisabled))
+			dotBox := container.NewGridWrap(fyne.NewSize(12, 12), dot)
+			right := container.NewHBox(container.NewCenter(dotBox), widget.NewLabel(""))
+			return container.NewBorder(nil, nil, nil, right, name)
 		},
 		func(id widget.ListItemID, o fyne.CanvasObject) {
 			r := servers[id]
@@ -123,9 +140,13 @@ func (u *ui) playTab() fyne.CanvasObject {
 			if ok {
 				text = st.String()
 			}
-			name, info, _ := rowParts(o)
-			name.SetText(r.label())
-			info.SetText(text)
+			c := o.(*fyne.Container)
+			right := c.Objects[1].(*fyne.Container)
+			c.Objects[0].(*widget.Label).SetText(r.label())
+			right.Objects[1].(*widget.Label).SetText(text)
+			dot := right.Objects[0].(*fyne.Container).Objects[0].(*fyne.Container).Objects[0].(*canvas.Circle)
+			dot.FillColor = statusColor(st, ok)
+			dot.Refresh()
 		},
 	)
 
