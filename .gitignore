@@ -1,0 +1,4 @@
+/dist/
+/fyne-cross/
+*.exe
+*.AppImage
