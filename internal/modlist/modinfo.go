@@ -75,6 +75,7 @@ type Mod struct {
 	InfoPath     string
 	Source       Source
 	WorkshopID   string
+	JavaJar      string
 }
 
 func javaLines(s string) []string {
@@ -126,6 +127,10 @@ func ParseModInfo(text, versionDir, commonDir string) (*Mod, error) {
 		return javaSplitComma(strings.ReplaceAll(strings.ReplaceAll(line, key, ""), `\`, ""))
 	}
 	for _, line := range javaLines(text) {
+		if v, ok := strings.CutPrefix(strings.TrimSpace(line), "javaJarFile="); ok {
+			m.JavaJar = strings.TrimSpace(v)
+			continue
+		}
 		switch {
 		case strings.Contains(line, "name="):
 			if v := strings.ReplaceAll(line, "name=", ""); !blank(v) {

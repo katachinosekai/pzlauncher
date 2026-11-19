@@ -143,6 +143,18 @@ func (e *Env) ScanMods(game GameVersion) *ModIndex {
 
 func (x *ModIndex) Len() int { return len(x.Mods) }
 
+func ScanInstalled() (*ModIndex, error) {
+	e, err := Default()
+	if err != nil {
+		return nil, err
+	}
+	var game GameVersion
+	if gi, err := ReadGameInfo(e.GameDir); err == nil {
+		game = gi.Version
+	}
+	return e.ScanMods(game), nil
+}
+
 func isFile(p string) bool {
 	st, err := os.Stat(p)
 	return err == nil && !st.IsDir()

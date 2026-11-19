@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/kata/pzlauncher/internal/modlist"
 )
 
 func write(t *testing.T, p, s string, mt time.Time) {
@@ -121,7 +123,7 @@ func TestCollect(t *testing.T) {
 	var buf bytes.Buffer
 	files, err := Collect(&buf, CollectOptions{
 		ZomboidDir: z, KeptDir: kept, InstallerLogDirs: []string{inst, filepath.Join(inst, "none")},
-		GameDir: game, ModRoots: []string{filepath.Join(z, "mods")}, LauncherVersion: "1.2.3",
+		GameDir: game, Mods: modlist.Scan(modlist.Roots{ZomboidDir: z}, modlist.Version{Major: 42, Minor: 22}), LauncherVersion: "1.2.3",
 		Now: func() time.Time { return time.Date(2026, 11, 19, 6, 0, 0, 0, time.UTC) },
 	})
 	if err != nil {

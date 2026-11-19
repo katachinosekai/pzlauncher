@@ -202,3 +202,12 @@ func (x *Index) Unavailable(id string) string {
 	}
 	return "a required mod is unavailable"
 }
+
+func (x *Index) AllCopies() []*Mod {
+	out := append([]*Mod(nil), x.Mods...)
+	for _, ms := range x.Shadowed {
+		out = append(out, ms...)
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].Dir < out[j].Dir })
+	return out
+}

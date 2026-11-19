@@ -14,7 +14,9 @@ import (
 	"time"
 
 	"github.com/kata/pzlauncher/internal/javamods"
+	"github.com/kata/pzlauncher/internal/modlist"
 	"github.com/kata/pzlauncher/internal/paths"
+	"github.com/kata/pzlauncher/internal/play"
 )
 
 const maxFileBytes = 32 << 20
@@ -40,7 +42,7 @@ type CollectOptions struct {
 	KeptDir          string
 	InstallerLogDirs []string
 	GameDir          string
-	ModRoots         []string
+	Mods             *modlist.Index
 	LauncherVersion  string
 	Now              func() time.Time
 }
@@ -53,7 +55,9 @@ func DefaultCollectOptions(launcherVersion string) CollectOptions {
 	if root, err := paths.SteamRoot(); err == nil {
 		o.GameDir, _ = paths.GameDir(root)
 	}
-	o.ModRoots = javamods.DefaultRoots()
+	if idx, err := play.ScanInstalled(); err == nil {
+		o.Mods = idx.Index
+	}
 	return o
 }
 
@@ -254,7 +258,12 @@ func EnabledMods(defaultTxt string) []string {
 
 func modList(o CollectOptions) string {
 	var b strings.Builder
-	mods := javamods.ScanAll(o.ModRoots)
+	var mods []*javamods.ModInfo
+	if o.Mods != nil {
+		for _, m := range o.Mods.AllCopies() {
+			mods = append(mods, javamods.FromMod(m))
+		}
+	}
 	byID := map[string][]*javamods.ModInfo{}
 	for _, m := range mods {
 		byID[m.ID] = append(byID[m.ID], m)

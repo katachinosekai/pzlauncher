@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/kata/pzlauncher/internal/install"
+
+	"github.com/kata/pzlauncher/internal/modlist"
 )
 
 type Status int
@@ -242,12 +244,13 @@ func (m *JavaMod) ShortHash() string {
 	return m.JarHash
 }
 
-func List(roots []string, entries []Entry) []*JavaMod {
+func List(idx *modlist.Index, entries []Entry) []*JavaMod {
 	var out []*JavaMod
-	for _, mi := range ScanAll(roots) {
-		if mi.JarRel == "" {
+	for _, m := range idx.AllCopies() {
+		if m.JavaJar == "" {
 			continue
 		}
+		mi := FromMod(m)
 		jm := &JavaMod{ModInfo: mi, Jar: mi.JarPath()}
 		if h, err := HashFile(jm.Jar); err == nil {
 			jm.JarHash = h

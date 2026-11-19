@@ -11,6 +11,7 @@ import (
 	"fyne.io/fyne/v2/widget"
 
 	"github.com/kata/pzlauncher/internal/javamods"
+	"github.com/kata/pzlauncher/internal/play"
 )
 
 func (u *ui) javaModsTab() fyne.CanvasObject {
@@ -123,7 +124,10 @@ func (u *ui) javaModsTab() fyne.CanvasObject {
 			if err == nil {
 				es, err = st.Load()
 			}
-			ms := javamods.List(javamods.DefaultRoots(), es)
+			var ms []*javamods.JavaMod
+			if idx, serr := play.ScanInstalled(); serr == nil {
+				ms = javamods.List(idx.Index, es)
+			}
 			fyne.Do(func() {
 				refresh.Enable()
 				mods, entries = ms, es

@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/kata/pzlauncher/internal/modlist"
 )
 
 func write(t *testing.T, p, s string) {
@@ -52,7 +54,7 @@ func TestStatusOf(t *testing.T) {
 	}
 }
 
-func layout(t *testing.T) (roots []string, content string) {
+func layout(t *testing.T) (idx *modlist.Index, content string) {
 	base := t.TempDir()
 	content = filepath.Join(base, "steamapps", "workshop", "content", "108600")
 	vp := filepath.Join(content, "3809306528", "mods", "Viewpoint")
@@ -65,20 +67,22 @@ func layout(t *testing.T) (roots []string, content string) {
 	write(t, filepath.Join(zb, "common", "libs", "ZombieBuddy.jar.zbs"), "sig")
 	write(t, filepath.Join(content, "5", "mods", "LuaOnly", "42", "mod.info"), "id=LuaOnly\nname=Lua\n")
 	zm := filepath.Join(base, "Zomboid", "mods")
-	write(t, filepath.Join(zm, "Local", "mod.info"), "id=Local\nurl=https://steamcommunity.com/sharedfiles/filedetails/?id=777\njavaJarFile=x.jar\n")
-	write(t, filepath.Join(zm, "Local", "x.jar"), "x")
+	write(t, filepath.Join(zm, "Local", "42", "mod.info"), "id=Local\nurl=https://steamcommunity.com/sharedfiles/filedetails/?id=777\njavaJarFile=x.jar\n")
+	write(t, filepath.Join(zm, "Local", "42", "x.jar"), "x")
+	write(t, filepath.Join(zm, "B41Only", "mod.info"), "id=B41Only\njavaJarFile=x.jar\n")
 	write(t, filepath.Join(zm, "NoJar", "42", "mod.info"), "id=NoJar\njavaJarFile=missing.jar\n")
 	zw := filepath.Join(base, "Zomboid", "Workshop", "MyUpload", "Contents", "mods")
 	write(t, filepath.Join(base, "Zomboid", "Workshop", "MyUpload", "workshop.txt"), "version=1\nid=4242\n")
 	write(t, filepath.Join(zw, "Up", "42", "mod.info"), "id=Up\njavaJarFile=media/java/up.jar\n")
 	write(t, filepath.Join(zw, "Up", "common", "media", "java", "up.jar"), "up")
-	roots = append([]string{zm, zw}, WorkshopModRoots(content)...)
-	return roots, content
+	game, _ := modlist.ParseVersion("42.22")
+	idx = modlist.Scan(modlist.Roots{ZomboidDir: filepath.Join(base, "Zomboid"), WorkshopDir: content}, game)
+	return idx, content
 }
 
 func TestList(t *testing.T) {
-	roots, _ := layout(t)
-	mods := List(roots, nil)
+	idx, _ := layout(t)
+	mods := List(idx, nil)
 	by := map[string]*JavaMod{}
 	for _, m := range mods {
 		by[m.ID] = m
