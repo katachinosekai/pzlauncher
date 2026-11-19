@@ -9,6 +9,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
@@ -36,6 +37,7 @@ type wsDeps struct {
 	subs     func() ([]workshop.Sub, error)
 	check    func(ctx context.Context, cid string) (*workshop.Result, error)
 	thumb    func(ctx context.Context, u string) ([]byte, error)
+	local    func(itemDir string) workshop.LocalItem
 	external func(u string) error
 }
 
@@ -46,7 +48,8 @@ var workshopDeps = wsDeps{
 	details: func(ctx context.Context, ids []string) (map[string]workshop.Details, error) {
 		return workshop.FetchDetails(ctx, nil, "", ids)
 	},
-	subs: workshop.LocalSubscriptions,
+	subs:  workshop.LocalSubscriptions,
+	local: workshop.ReadLocalItem,
 	check: func(ctx context.Context, cid string) (*workshop.Result, error) {
 		return workshop.Check(ctx, workshop.Options{CollectionID: cid})
 	},
@@ -63,6 +66,7 @@ type wsItem struct {
 	Subscribed bool
 	Installed  bool
 	Preview    string
+	sub        workshop.SubState
 }
 
 func (it wsItem) displayTitle() string {
@@ -499,6 +503,52 @@ func subStateLabel(s workshop.SubState) string {
 	return "Downloading"
 }
 
+func subItems(subs []workshop.Sub, det map[string]workshop.Details, local map[string]workshop.LocalItem, detailsOK bool) []wsItem {
+	items := make([]wsItem, 0, len(subs))
+	for _, s := range subs {
+		d := det[s.ID]
+		l := local[s.ID]
+		_, public := det[s.ID]
+		info := detailsInfo(d)
+		if !public {
+			var parts []string
+			if s.Size > 0 {
+				parts = append(parts, humanSize(s.Size))
+			}
+			if s.Updated > 0 {
+				parts = append(parts, "updated "+time.Unix(s.Updated, 0).Format("2006-01-02"))
+			}
+			if detailsOK {
+				parts = append(parts, "private or hidden on the Workshop")
+			}
+			if l.Description != "" {
+				parts = append(parts, l.Description)
+			}
+			info = strings.Join(parts, "  ·  ")
+		}
+		title := d.Title
+		if title == "" {
+			title = l.Title
+		}
+		preview := d.Preview
+		if preview == "" {
+			preview = l.Image
+		}
+		items = append(items, wsItem{ID: s.ID, Title: title, Info: info, State: subStateLabel(s.State), Subscribed: true, Installed: s.State == workshop.SubInstalled, Preview: preview, sub: s.State})
+	}
+	sort.SliceStable(items, func(i, j int) bool {
+		a, b := items[i], items[j]
+		if a.sub != b.sub {
+			return a.sub > b.sub
+		}
+		if (a.Title == "") != (b.Title == "") {
+			return a.Title != ""
+		}
+		return strings.ToLower(a.Title) < strings.ToLower(b.Title)
+	})
+	return items
+}
+
 func (b *wsBrowser) subsTab() (fyne.CanvasObject, func()) {
 	var items []wsItem
 	list := b.itemList(&items)
@@ -519,6 +569,12 @@ func (b *wsBrowser) subsTab() (fyne.CanvasObject, func()) {
 				}
 				det, derr = b.deps.details(b.u.ctx, ids)
 			}
+			local := map[string]workshop.LocalItem{}
+			for _, s := range subs {
+				if d := det[s.ID]; d.Title == "" || d.Preview == "" {
+					local[s.ID] = b.deps.local(s.Dir)
+				}
+			}
 			fyne.Do(func() {
 				refresh.Enable()
 				if err != nil {
@@ -528,22 +584,10 @@ func (b *wsBrowser) subsTab() (fyne.CanvasObject, func()) {
 					return
 				}
 				counts := map[workshop.SubState]int{}
-				items = items[:0]
-				sort.SliceStable(subs, func(i, j int) bool {
-					if subs[i].State != subs[j].State {
-						return subs[i].State > subs[j].State
-					}
-					return strings.ToLower(det[subs[i].ID].Title) < strings.ToLower(det[subs[j].ID].Title)
-				})
 				for _, s := range subs {
 					counts[s.State]++
-					d := det[s.ID]
-					info := detailsInfo(d)
-					if d.Title == "" && s.Size > 0 {
-						info = humanSize(s.Size)
-					}
-					items = append(items, wsItem{ID: s.ID, Title: d.Title, Info: info, State: subStateLabel(s.State), Subscribed: true, Installed: s.State == workshop.SubInstalled, Preview: d.Preview})
 				}
+				items = subItems(subs, det, local, derr == nil)
 				list.Refresh()
 				msg := fmt.Sprintf("%d subscribed: %d installed, %d update pending, %d downloading or queued.", len(subs), counts[workshop.SubInstalled], counts[workshop.SubNeedsUpdate], counts[workshop.SubDownloading])
 				if derr != nil {

@@ -31,6 +31,7 @@ type Sub struct {
 	State   SubState
 	Size    int64
 	Updated int64
+	Dir     string
 }
 
 func ParseSubscriptions(acfText, contentDir string) ([]Sub, error) {
@@ -62,6 +63,9 @@ func ParseSubscriptions(acfText, contentDir string) ([]Sub, error) {
 			return
 		}
 		s := Sub{ID: id, State: SubDownloading}
+		if contentDir != "" {
+			s.Dir = filepath.Join(contentDir, id)
+		}
 		if in != nil {
 			s.Size, _ = strconv.ParseInt(in.Vals["size"], 10, 64)
 			s.Updated, _ = strconv.ParseInt(in.Vals["timeupdated"], 10, 64)

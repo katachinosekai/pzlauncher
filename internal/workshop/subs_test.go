@@ -109,7 +109,7 @@ func TestParseSubscriptions(t *testing.T) {
 			t.Errorf("%s: %v want %v", id, got[id].State, st)
 		}
 	}
-	if got["100"].Size != 500 || got["100"].Updated != 1700000000 {
+	if got["100"].Size != 500 || got["100"].Updated != 1700000000 || got["100"].Dir != filepath.Join(content, "100") {
 		t.Fatalf("%+v", got["100"])
 	}
 	if subs[0].State != SubDownloading || subs[len(subs)-1].State != SubInstalled {
@@ -133,5 +133,36 @@ func TestParseSubscriptions(t *testing.T) {
 	}
 	if SubNeedsUpdate.String() == "" || SubDownloading.String() == SubInstalled.String() {
 		t.Fatal("strings")
+	}
+}
+
+func TestReadLocalItem(t *testing.T) {
+	item := t.TempDir()
+	write := func(rel, text string) {
+		p := filepath.Join(item, rel)
+		os.MkdirAll(filepath.Dir(p), 0o755)
+		if err := os.WriteFile(p, []byte(text), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("mods/Fences/42/mod.info", "name=Viewpoint - 3D Fences\nid=Fences\ndescription=3D   fences.\nposter=../common/poster.png\nicon=../common/icon.png\n")
+	write("mods/Fences/common/poster.png", "png")
+	write("mods/Alpha/common/mod.info", "id=Alpha\nposter=missing.png\n")
+	write("mods/NoInfo/readme.txt", "x")
+	got := ReadLocalItem(item)
+	want := LocalItem{Title: "Alpha, Viewpoint - 3D Fences", Image: filepath.Join(item, "mods/Fences/42/../common/poster.png"), Description: "3D fences."}
+	if got.Title != want.Title || filepath.Clean(got.Image) != filepath.Clean(want.Image) || got.Description != want.Description {
+		t.Fatalf("%+v", got)
+	}
+	os.Remove(filepath.Join(item, "mods/Fences/common/poster.png"))
+	write("mods/Fences/common/icon.png", "png")
+	if got := ReadLocalItem(item); filepath.Base(got.Image) != "icon.png" {
+		t.Fatalf("icon fallback: %+v", got)
+	}
+	if got := ReadLocalItem(filepath.Join(item, "nope")); got != (LocalItem{}) {
+		t.Fatalf("%+v", got)
+	}
+	if got := ReadLocalItem(""); got != (LocalItem{}) {
+		t.Fatalf("%+v", got)
 	}
 }

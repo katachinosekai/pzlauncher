@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"image"
+	"image/draw"
 	"image/png"
 	"io"
 	"net/http"
@@ -15,17 +16,21 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/kata/pzlauncher/internal/modlist"
 )
 
 const thumbSide = 128
 
+const thumbRetry = time.Minute
+
 type thumbCache struct {
 	mu       sync.Mutex
 	mem      map[string]image.Image
 	order    []string
 	inflight map[string][]func(image.Image)
+	failed   map[string]time.Time
 	sem      chan struct{}
 	dir      string
 	fetch    func(ctx context.Context, u string) ([]byte, error)
@@ -39,7 +44,7 @@ func newThumbCache(fetch func(ctx context.Context, u string) ([]byte, error)) *t
 	if fetch == nil {
 		fetch = httpFetch
 	}
-	return &thumbCache{mem: map[string]image.Image{}, inflight: map[string][]func(image.Image){}, sem: make(chan struct{}, 4), dir: dir, fetch: fetch}
+	return &thumbCache{mem: map[string]image.Image{}, inflight: map[string][]func(image.Image){}, failed: map[string]time.Time{}, sem: make(chan struct{}, 4), dir: dir, fetch: fetch}
 }
 
 func thumbURL(raw string) string {
@@ -75,6 +80,10 @@ func (c *thumbCache) Get(ctx context.Context, u string, done func(image.Image)) 
 		c.mu.Unlock()
 		return im
 	}
+	if t, ok := c.failed[u]; ok && time.Since(t) < thumbRetry {
+		c.mu.Unlock()
+		return nil
+	}
 	waiting, busy := c.inflight[u]
 	c.inflight[u] = append(waiting, done)
 	c.mu.Unlock()
@@ -91,7 +100,10 @@ func (c *thumbCache) load(ctx context.Context, u string) {
 	c.mu.Lock()
 	cbs := c.inflight[u]
 	delete(c.inflight, u)
-	if im != nil {
+	if im == nil {
+		c.failed[u] = time.Now()
+	} else {
+		delete(c.failed, u)
 		c.mem[u] = im
 		c.order = append(c.order, u)
 		if len(c.order) > 600 {
@@ -110,7 +122,28 @@ func (c *thumbCache) load(ctx context.Context, u string) {
 	}
 }
 
+func isRemote(u string) bool {
+	return strings.HasPrefix(u, "https://") || strings.HasPrefix(u, "http://")
+}
+
+func toNRGBA(im image.Image) image.Image {
+	if _, ok := im.(*image.NRGBA); ok {
+		return im
+	}
+	b := im.Bounds()
+	dst := image.NewNRGBA(image.Rect(0, 0, b.Dx(), b.Dy()))
+	draw.Draw(dst, dst.Bounds(), im, b.Min, draw.Src)
+	return dst
+}
+
 func (c *thumbCache) loadImage(ctx context.Context, u string) image.Image {
+	if !isRemote(u) {
+		im, err := modlist.LoadImage(u, thumbSide)
+		if err != nil {
+			return nil
+		}
+		return toNRGBA(im)
+	}
 	var file string
 	if c.dir != "" {
 		sum := sha1.Sum([]byte(u))
@@ -129,7 +162,7 @@ func (c *thumbCache) loadImage(ctx context.Context, u string) image.Image {
 	if err != nil {
 		return nil
 	}
-	im = modlist.Downscale(im, thumbSide)
+	im = toNRGBA(modlist.Downscale(im, thumbSide))
 	if file != "" {
 		var buf bytes.Buffer
 		if png.Encode(&buf, im) == nil && os.MkdirAll(c.dir, 0o755) == nil {
