@@ -49,41 +49,50 @@ func statusColor(st play.ServerStatus, known bool) color.Color {
 	}
 }
 
-func rowParts(o fyne.CanvasObject) (name, info *widget.Label, img *canvas.Image) {
-	for _, c := range o.(*fyne.Container).Objects {
+type rowRefs struct {
+	name, info *widget.Label
+	img        *canvas.Image
+	bg         *canvas.Rectangle
+}
+
+func findParts(o fyne.CanvasObject) rowRefs {
+	var r rowRefs
+	var walk func(fyne.CanvasObject)
+	walk = func(c fyne.CanvasObject) {
 		switch v := c.(type) {
 		case *canvas.Image:
-			img = v
+			if r.img == nil {
+				r.img = v
+			}
+		case *canvas.Rectangle:
+			if r.bg == nil {
+				r.bg = v
+			}
 		case *widget.Label:
-			if name == nil {
-				name = v
-			} else {
-				info = v
+			if r.name == nil {
+				r.name = v
+			} else if r.info == nil {
+				r.info = v
 			}
 		case *fyne.Container:
 			for _, inner := range v.Objects {
-				if l, ok := inner.(*widget.Label); ok {
-					if name == nil {
-						name = l
-					} else {
-						info = l
-					}
-					break
-				}
+				walk(inner)
 			}
 		}
 	}
-	return name, info, img
+	walk(o)
+	return r
 }
 
 func (u *ui) playTab() fyne.CanvasObject {
 	var (
-		saves   []play.Save
-		servers []serverRow
-		target  *play.Target
-		picked  = -1
-		statMu  sync.Mutex
-		stats   = map[string]play.ServerStatus{}
+		saves        []play.Save
+		servers      []serverRow
+		target       *play.Target
+		picked       = -1
+		selectedSave = -1
+		statMu       sync.Mutex
+		stats        = map[string]play.ServerStatus{}
 	)
 	nickPath, _ := play.NicknamesPath()
 	nicks, _ := play.LoadNicknames(nickPath)
@@ -95,15 +104,25 @@ func (u *ui) playTab() fyne.CanvasObject {
 		func() fyne.CanvasObject {
 			img := canvas.NewImageFromResource(nil)
 			img.FillMode = canvas.ImageFillContain
+			img.CornerRadius = 8
 			img.SetMinSize(fyne.NewSize(64, 64))
 			name := widget.NewLabel("")
 			name.Truncation = fyne.TextTruncateEllipsis
 			info := widget.NewLabel("")
 			mid := container.NewVBox(layout.NewSpacer(), name, layout.NewSpacer())
-			return container.NewBorder(nil, nil, img, container.NewCenter(info), mid)
+			bg := canvas.NewRectangle(theme.Color(theme.ColorNameInputBackground))
+			bg.CornerRadius = 10
+			inner := container.New(layout.NewCustomPaddedLayout(4, 4, 4, 8), container.NewBorder(nil, nil, img, container.NewCenter(info), mid))
+			return container.New(layout.NewCustomPaddedLayout(3, 3, 0, 0), container.NewStack(bg, inner))
 		},
 		func(id widget.ListItemID, o fyne.CanvasObject) {
-			name, info, img := rowParts(o)
+			refs := findParts(o)
+			name, info, img := refs.name, refs.info, refs.img
+			refs.bg.FillColor = theme.Color(theme.ColorNameInputBackground)
+			if id == selectedSave {
+				refs.bg.FillColor = theme.Color(theme.ColorNameSelection)
+			}
+			refs.bg.Refresh()
 			thumb := ""
 			if id == 0 {
 				name.SetText("Continue latest save")
@@ -161,7 +180,14 @@ func (u *ui) playTab() fyne.CanvasObject {
 	nickBtn := widget.NewButton("Nickname...", nil)
 	nickBtn.Disable()
 
+	saveList.HideSeparators = true
+	saveList.OnUnselected = func(id widget.ListItemID) {
+		selectedSave = -1
+		saveList.RefreshItem(id)
+	}
 	saveList.OnSelected = func(id widget.ListItemID) {
+		selectedSave = id
+		saveList.RefreshItem(id)
 		serverList.UnselectAll()
 		t := play.Latest()
 		desc := "Continue latest save"
