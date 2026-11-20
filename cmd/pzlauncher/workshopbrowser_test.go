@@ -184,7 +184,7 @@ func shootWorkshop(t *testing.T, dir, suffix string, wait time.Duration, tabs []
 		png.Encode(f, w.Canvas().Capture())
 		f.Close()
 	}
-	names := []string{"Workshop-MySubscriptions", "Workshop-SearchForCollection", "Workshop-Search", "Workshop-PopularRecentMods", "Workshop-MySubscribedCollection"}
+	names := []string{"Workshop-MySubscriptions", "Workshop-MySubscribedCollection", "Workshop-Search", "Workshop-PopularRecentMods", "Workshop-SearchForCollection"}
 	for _, i := range tabs {
 		inner.SelectIndex(i)
 		time.Sleep(wait)

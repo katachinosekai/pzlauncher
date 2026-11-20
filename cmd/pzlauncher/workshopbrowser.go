@@ -121,13 +121,13 @@ func (u *ui) workshopTab() fyne.CanvasObject {
 
 	tabs := container.NewAppTabs(
 		container.NewTabItem("My subscriptions", widget.NewLabel("")),
-		container.NewTabItem("Search for Collection", widget.NewLabel("")),
+		container.NewTabItem("My Subscribed Collection", widget.NewLabel("")),
 		container.NewTabItemWithIcon("", theme.SearchIcon(), widget.NewLabel("")),
 		container.NewTabItem("Popular / Recent Mods", widget.NewLabel("")),
-		container.NewTabItem("My Subscribed Collection", widget.NewLabel("")),
+		container.NewTabItem("Search for Collection", widget.NewLabel("")),
 	)
 	const searchIdx = 2
-	builders := []func() (fyne.CanvasObject, func()){b.subsTab, b.collectionsTab, b.searchTab, b.popularTab, b.collectionTab}
+	builders := []func() (fyne.CanvasObject, func()){b.subsTab, b.collectionTab, b.searchTab, b.popularTab, b.collectionsTab}
 	var viewing *container.TabItem
 	b.openCollection = func(id, title string) {
 		view, load := b.collectionView(id)
