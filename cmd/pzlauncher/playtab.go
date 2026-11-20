@@ -137,6 +137,7 @@ func findParts(o fyne.CanvasObject) rowRefs {
 }
 
 type serverParts struct {
+	card                  *tapCard
 	name, status, details *widget.Label
 	dot                   *canvas.Circle
 	icon                  *widget.Icon
@@ -161,14 +162,16 @@ func newServerItem() (fyne.CanvasObject, *serverParts) {
 	right := container.NewHBox(container.NewCenter(dotBox), p.status, p.icon, p.toggle)
 	top := container.NewBorder(nil, nil, nil, right, p.name)
 	details := container.New(layout.NewCustomPaddedLayout(0, 0, 16, 0), p.details)
-	return container.NewVBox(top, details), p
+	p.card = newTapCard(container.NewVBox(top, details))
+	return p.card, p
 }
 
 type tapCard struct {
 	widget.BaseWidget
-	content fyne.CanvasObject
-	onTap   func()
-	onMenu  func(*fyne.PointEvent)
+	content  fyne.CanvasObject
+	onTap    func()
+	onDouble func()
+	onMenu   func(*fyne.PointEvent)
 }
 
 func newTapCard(c fyne.CanvasObject) *tapCard {
@@ -181,6 +184,14 @@ func (t *tapCard) CreateRenderer() fyne.WidgetRenderer { return widget.NewSimple
 
 func (t *tapCard) Tapped(*fyne.PointEvent) {
 	if t.onTap != nil {
+		t.onTap()
+	}
+}
+
+func (t *tapCard) DoubleTapped(*fyne.PointEvent) {
+	if t.onDouble != nil {
+		t.onDouble()
+	} else if t.onTap != nil {
 		t.onTap()
 	}
 }
@@ -305,6 +316,7 @@ func (u *ui) playTab() fyne.CanvasObject {
 
 	cardH := func() float32 { o, _ := newSaveItem(); return o.MinSize().Height }()
 	var saveList *widget.List
+	launchSelected := func() {}
 	var fitSaves func()
 	var nicknameFor func(play.Save)
 	panelFor := func(sv play.Save) fyne.CanvasObject {
@@ -377,6 +389,10 @@ func (u *ui) playTab() fyne.CanvasObject {
 			}
 			p.img.Refresh()
 			p.card.onTap = func() { saveList.Select(id) }
+			p.card.onDouble = func() {
+				saveList.Select(id)
+				launchSelected()
+			}
 			if id == 0 {
 				p.toggle.Hide()
 				p.details.Hide()
@@ -451,6 +467,11 @@ func (u *ui) playTab() fyne.CanvasObject {
 			}
 			r := servers[id]
 			key := r.key()
+			p.card.onTap = func() { serverList.Select(id) }
+			p.card.onDouble = func() {
+				serverList.Select(id)
+				launchSelected()
+			}
 			statMu.Lock()
 			st, ok := stats[r.server.Addr()]
 			check, checked := serverChecks[key]
@@ -585,7 +606,7 @@ func (u *ui) playTab() fyne.CanvasObject {
 		saveList.Refresh()
 		serverList.Refresh()
 		if err == nil && serr == nil {
-			status.SetText(fmt.Sprintf("%s, %s. Pick one and press Launch.", plural(len(saves), "save", "saves"), plural(len(servers), "saved server account", "saved server accounts")))
+			status.SetText(fmt.Sprintf("%s, %s. Pick one and press Launch, or double-click it.", plural(len(saves), "save", "saves"), plural(len(servers), "saved server account", "saved server accounts")))
 		}
 		fitSaves()
 		go runSaveChecks(append([]play.Save(nil), saves...))
@@ -652,7 +673,7 @@ func (u *ui) playTab() fyne.CanvasObject {
 	}
 
 	launch.OnTapped = func() {
-		if target == nil {
+		if target == nil || launch.Disabled() {
 			return
 		}
 		t := *target
@@ -681,6 +702,7 @@ func (u *ui) playTab() fyne.CanvasObject {
 		d.Resize(fyne.NewSize(520, 320))
 		d.Show()
 	}
+	launchSelected = launch.OnTapped
 
 	nicknameFor = func(s play.Save) {
 		entry := widget.NewEntry()

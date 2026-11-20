@@ -20,7 +20,7 @@ The launcher updates itself: press **Check for updates** at the bottom. Updates 
 ## Features
 
 ### Play
-Your single-player saves and saved servers, with checks before launch (game version, missing or outdated mods, server online, version and players). Launch straight into a save or onto a server.
+Your single-player saves and saved servers, with checks before launch (game version, missing or outdated mods, server online, version and players). Launch straight into a save or onto a server; double-click a save or server to launch it.
 
 ### Mods
 | | |

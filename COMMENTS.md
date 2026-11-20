@@ -343,3 +343,5 @@ Mini player (top bar, left of the Steam button, 16 px gap): fades in (background
 ## third-party licences (2026-11-19)
 
 `scripts/thirdparty.sh` writes cmd/pzlauncher/THIRD_PARTY_LICENSES.txt (every non-std module in the wayland build, full licence + any NOTICE, fails if a module has no licence file). Embedded in the binary; About & credits > Third-party licences shows it, and release.sh copies it next to the binaries. Re-run after any go.mod change (release.sh does it and refuses if the file changed).
+
+Play tab double-click (2026-11-19): save cards and server rows are `tapCard`s; `onDouble` selects the row and runs `launchSelected` (= launch.OnTapped, so the same checks, warning dialog and backup run). A tapCard without onDouble treats a double tap as a tap. Fyne delays single taps on double-tappable widgets by the double-tap interval.
