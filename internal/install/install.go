@@ -57,6 +57,7 @@ type Options struct {
 	PollInterval           time.Duration
 	SteamPollInterval      time.Duration
 	OnWait                 func(WaitStatus)
+	ConfirmApprovals       func([]Approval) bool
 	Now                    func() time.Time
 	SetupZombieBuddy       bool
 	ZombieBuddyJar         string
@@ -99,7 +100,12 @@ type Installer struct {
 	zb        zbState
 }
 
+var ErrElevated = errors.New("the launcher is running as administrator/root; start it normally (files it creates would belong to the administrator and Steam/the game would start elevated)")
+
 func New(opts Options) (*Installer, error) {
+	if opts.System == nil && Elevated() {
+		return nil, ErrElevated
+	}
 	if opts.PackDir == "" {
 		return nil, errors.New("PackDir is required")
 	}

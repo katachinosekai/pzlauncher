@@ -26,6 +26,8 @@ var (
 	rePassword  = regexp.MustCompile(`(?i)(password\s*=\s*)[^\s&;,"']+`)
 	rePassJSON  = regexp.MustCompile(`(?i)("[a-z_]*password"\s*:\s*)"(?:[^"\\]|\\.)*"`)
 	rePassSpace = regexp.MustCompile(`(?i)(-password\s+)\S+`)
+	reWinUser   = regexp.MustCompile(`(?i)([a-z]:[\\/]+(?:users|documents and settings)[\\/]+)[^\\/\s"':;]+`)
+	reNixUser   = regexp.MustCompile(`(/(?:home|Users)/|/run/media/|/media/)[^/\s"':;]+`)
 	reModLine   = regexp.MustCompile(`^\s*mod\s*=\s*\\?([^,]+?)\s*,?\s*$`)
 )
 
@@ -34,6 +36,8 @@ func Redact(s string) string {
 	s = rePassword.ReplaceAllString(s, "${1}<redacted>")
 	s = rePassJSON.ReplaceAllString(s, `${1}"<redacted>"`)
 	s = rePassSpace.ReplaceAllString(s, "${1}<redacted>")
+	s = reWinUser.ReplaceAllString(s, "${1}<user>")
+	s = reNixUser.ReplaceAllString(s, "${1}<user>")
 	return s
 }
 

@@ -3,11 +3,15 @@ package main
 import (
 	"errors"
 	"fmt"
+	"image/color"
+	"time"
 
 	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/layout"
+	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
 	"github.com/katachinosekai/pzlauncher/internal/javamods"
@@ -15,9 +19,10 @@ import (
 )
 
 func (u *ui) javaModsTab() fyne.CanvasObject {
-	note := widget.NewLabel("Java mods run code outside the game's Lua sandbox and aren't officially supported by The Indie Stone. Only approve mods you trust.")
-	note.Wrapping = fyne.TextWrapWord
-	note.Importance = widget.WarningImportance
+	noteText := widget.NewLabel("Java mods run code outside the game's Lua sandbox and aren't officially supported by The Indie Stone. Only approve mods you trust.")
+	noteText.Wrapping = fyne.TextWrapWord
+	noteText.Importance = widget.WarningImportance
+	note := warningCard(noteText)
 	summary := widget.NewLabel("Press Refresh to list installed Java mods.")
 	summary.Wrapping = fyne.TextWrapWord
 
@@ -39,7 +44,7 @@ func (u *ui) javaModsTab() fyne.CanvasObject {
 			status.Truncation = fyne.TextTruncateEllipsis
 			approve := widget.NewButton("Approve this jar", nil)
 			deny := widget.NewButton("Deny", nil)
-			return container.NewVBox(title, detail, container.NewBorder(nil, nil, nil, container.NewHBox(approve, deny), status))
+			return container.New(layout.NewCustomPaddedVBoxLayout(-theme.Padding()*2), title, detail, container.NewBorder(nil, nil, nil, container.NewHBox(approve, deny), status))
 		},
 		func(i widget.ListItemID, o fyne.CanvasObject) {
 			if i >= len(mods) {
@@ -115,7 +120,12 @@ func (u *ui) javaModsTab() fyne.CanvasObject {
 	)
 
 	var refresh *widget.Button
+	scanning := false
 	reload = func() {
+		if scanning {
+			return
+		}
+		scanning = true
 		refresh.Disable()
 		summary.SetText("Scanning mods...")
 		go func() {
@@ -129,6 +139,7 @@ func (u *ui) javaModsTab() fyne.CanvasObject {
 				ms = javamods.List(idx.Index, es)
 			}
 			fyne.Do(func() {
+				scanning = false
 				refresh.Enable()
 				mods, entries = ms, es
 				store = st
@@ -148,7 +159,49 @@ func (u *ui) javaModsTab() fyne.CanvasObject {
 			})
 		}()
 	}
-	refresh = widget.NewButton("Refresh", reload)
-	top := container.NewVBox(note, container.NewHBox(refresh, layout.NewSpacer()), summary)
-	return container.NewBorder(top, nil, nil, nil, list)
+	refresh = widget.NewButtonWithIcon("Refresh", theme.ViewRefreshIcon(), reload)
+	refreshRow := container.New(layout.NewCustomPaddedLayout(6, 6, 2, 0), container.NewHBox(refresh, layout.NewSpacer()))
+	top := container.New(layout.NewCustomPaddedVBoxLayout(2), note, refreshRow, summary)
+	content := container.NewBorder(top, nil, nil, nil, list)
+	t := time.NewTicker(javaModsRefresh)
+	u.closers = append(u.closers, t.Stop)
+	go func() {
+		time.Sleep(300 * time.Millisecond)
+		fyne.Do(reload)
+		for range t.C {
+			fyne.Do(func() {
+				if content.Visible() {
+					reload()
+				}
+			})
+		}
+	}()
+	return content
+}
+
+const javaModsRefresh = 20 * time.Second
+
+type noteTheme struct{ fyne.Theme }
+
+func (t noteTheme) Size(n fyne.ThemeSizeName) float32 {
+	switch n {
+	case theme.SizeNameText:
+		return t.Theme.Size(n) - 1.5
+	case theme.SizeNamePadding:
+		return 2
+	case theme.SizeNameInnerPadding:
+		return 5
+	}
+	return t.Theme.Size(n)
+}
+
+func warningCard(o fyne.CanvasObject) fyne.CanvasObject {
+	warn := theme.Color(theme.ColorNameWarning)
+	r, g, b, _ := warn.RGBA()
+	tint := func(a uint8) color.Color { return color.NRGBA{uint8(r >> 8), uint8(g >> 8), uint8(b >> 8), a} }
+	bg := canvas.NewRectangle(tint(0x1e))
+	bg.CornerRadius = 8
+	bg.StrokeColor = tint(0x55)
+	bg.StrokeWidth = 1
+	return container.NewStack(bg, container.New(layout.NewCustomPaddedLayout(2, 2, 6, 6), container.NewThemeOverride(o, noteTheme{fyne.CurrentApp().Settings().Theme()})))
 }

@@ -4,7 +4,9 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"crypto/ed25519"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -39,13 +41,21 @@ func sum(b []byte) string {
 }
 
 type fakeGH struct {
-	srv   *httptest.Server
-	files map[string][]byte
-	man   Manifest
+	srv    *httptest.Server
+	files  map[string][]byte
+	man    Manifest
+	signed bool
+	tamper bool
 }
 
+var testKey = func() ed25519.PrivateKey {
+	k := ed25519.NewKeyFromSeed(make([]byte, ed25519.SeedSize))
+	ReleasePublicKey = base64.StdEncoding.EncodeToString(k.Public().(ed25519.PublicKey))
+	return k
+}()
+
 func newFakeGH(t *testing.T, files map[string][]byte, man Manifest) *fakeGH {
-	f := &fakeGH{files: files, man: man}
+	f := &fakeGH{files: files, man: man, signed: true}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/repos/me/pzlauncher/releases/latest", func(w http.ResponseWriter, r *http.Request) {
 		var assets []map[string]any
@@ -54,12 +64,24 @@ func newFakeGH(t *testing.T, files map[string][]byte, man Manifest) *fakeGH {
 		}
 		mb, _ := json.Marshal(f.man)
 		assets = append(assets, map[string]any{"name": ManifestName, "size": len(mb), "browser_download_url": f.srv.URL + "/dl/" + ManifestName})
+		if f.signed {
+			assets = append(assets, map[string]any{"name": SignatureName, "size": 88, "browser_download_url": f.srv.URL + "/dl/" + SignatureName})
+		}
 		json.NewEncoder(w).Encode(map[string]any{"tag_name": "v1.2.0", "name": "Pack 1.2.0", "assets": assets})
 	})
 	mux.HandleFunc("/dl/", func(w http.ResponseWriter, r *http.Request) {
 		name := strings.TrimPrefix(r.URL.Path, "/dl/")
+		mb, _ := json.Marshal(f.man)
 		if name == ManifestName {
-			json.NewEncoder(w).Encode(f.man)
+			w.Write(mb)
+			return
+		}
+		if name == SignatureName {
+			sig := ed25519.Sign(testKey, mb)
+			if f.tamper {
+				sig[0] ^= 1
+			}
+			w.Write([]byte(base64.StdEncoding.EncodeToString(sig)))
 			return
 		}
 		b, ok := f.files[name]
@@ -210,5 +232,15 @@ func TestReplace(t *testing.T) {
 	b, _ := os.ReadFile(target)
 	if string(b) != "new" {
 		t.Fatalf("got %q", b)
+	}
+}
+
+func TestUnsignedOrTamperedRelease(t *testing.T) {
+	for _, c := range []struct{ signed, tamper bool }{{false, false}, {true, true}} {
+		f := newFakeGH(t, map[string][]byte{}, Manifest{LauncherVersion: "9.9.9"})
+		f.signed, f.tamper = c.signed, c.tamper
+		if _, err := f.client(t).Latest(context.Background()); !errors.Is(err, ErrUnsigned) {
+			t.Fatalf("signed=%v tamper=%v: got %v, want ErrUnsigned", c.signed, c.tamper, err)
+		}
 	}
 }

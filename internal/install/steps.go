@@ -1,6 +1,7 @@
 package install
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -369,6 +370,10 @@ func (in *Installer) LocalMods(ctx context.Context) error {
 			id := e.Name()
 			from := filepath.Join(src, id)
 			dst := filepath.Join(zmods, id)
+			if f := testTrigger(from); f != "" {
+				in.warn("local mod " + id + " skipped: " + f + " contains the test-only AutoLua trigger, which must never ship to players")
+				continue
+			}
 			if sameTree(from, dst) {
 				in.say("  " + id + ": up to date")
 				continue
@@ -459,7 +464,8 @@ func (in *Installer) Approvals(ctx context.Context) error {
 			return err
 		}
 	}
-	out, added, err := MergeApprovals(existing, ParseApprovals(t))
+	want := ParseApprovals(t)
+	out, added, err := MergeApprovals(existing, want)
 	if err != nil {
 		return err
 	}
@@ -467,6 +473,19 @@ func (in *Installer) Approvals(ctx context.Context) error {
 		in.say("  already approved")
 		in.say("")
 		return nil
+	}
+	if in.opts.ConfirmApprovals != nil && !in.opts.DryRun {
+		var fresh []Approval
+		for _, a := range want {
+			if _, n, err := MergeApprovals(existing, []Approval{a}); err == nil && n > 0 {
+				fresh = append(fresh, a)
+			}
+		}
+		if !in.opts.ConfirmApprovals(fresh) {
+			in.warn("ZombieBuddy approvals not added (you declined); ZombieBuddy asks about these jars at the next game start")
+			in.say("")
+			return nil
+		}
 	}
 	if existing != nil {
 		if err := in.backupFile("mod_approvals.json", in.zbHome, ".zombie_buddy"); err != nil {
@@ -806,4 +825,18 @@ func (in *Installer) sameAfterModList(src, dst, rel string) bool {
 		}
 	}
 	return st == dt
+}
+
+func testTrigger(dir string) string {
+	files, err := listFiles(dir)
+	if err != nil {
+		return ""
+	}
+	for _, f := range files {
+		b, err := os.ReadFile(filepath.Join(dir, f))
+		if err == nil && bytes.Contains(b, []byte("AutoLua.txt")) {
+			return f
+		}
+	}
+	return ""
 }

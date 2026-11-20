@@ -2,6 +2,8 @@ package update
 
 import (
 	"context"
+	"crypto/ed25519"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -17,7 +19,12 @@ import (
 
 var Repo = "katachinosekai/pzlauncher"
 
+var ReleasePublicKey = "1esjE+gIQaDPJ48Rojr/mQeNTFonUHuBPiJOrN4/7VM="
+
+var ErrUnsigned = errors.New("the release's manifest.json is not signed with the launcher's release key; refusing to use it")
+
 const (
+	SignatureName    = "manifest.json.sig"
 	ManifestName     = "manifest.json"
 	WindowsBinary    = "PZLauncher-windows-amd64.exe"
 	LinuxBinary      = "PZLauncher-linux-x86_64.AppImage"
@@ -139,12 +146,22 @@ func (c *Client) Latest(ctx context.Context) (*Release, error) {
 	if m == nil {
 		return nil, errors.New("release has no manifest.json")
 	}
-	mresp, err := c.get(ctx, m.URL, "application/octet-stream")
+	sa := rel.Asset(SignatureName)
+	if sa == nil {
+		return nil, ErrUnsigned
+	}
+	mb, err := c.fetchSmall(ctx, m.URL, maxManifestBytes)
 	if err != nil {
 		return nil, err
 	}
-	defer mresp.Body.Close()
-	if err := json.NewDecoder(io.LimitReader(mresp.Body, maxManifestBytes)).Decode(&rel.Manifest); err != nil {
+	sb, err := c.fetchSmall(ctx, sa.URL, 4096)
+	if err != nil {
+		return nil, err
+	}
+	if !VerifyManifest(mb, sb) {
+		return nil, ErrUnsigned
+	}
+	if err := json.Unmarshal(mb, &rel.Manifest); err != nil {
 		return nil, fmt.Errorf("parsing manifest.json: %w", err)
 	}
 	return rel, nil
@@ -212,4 +229,32 @@ func Newer(latest, current string) bool {
 		return true
 	}
 	return Compare(latest, current) > 0
+}
+
+func (c *Client) fetchSmall(ctx context.Context, url string, limit int64) ([]byte, error) {
+	resp, err := c.get(ctx, url, "application/octet-stream")
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	b, err := io.ReadAll(io.LimitReader(resp.Body, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(b)) > limit {
+		return nil, fmt.Errorf("%s is too large", path.Base(url))
+	}
+	return b, nil
+}
+
+func VerifyManifest(manifest, sig []byte) bool {
+	pub, err := base64.StdEncoding.DecodeString(ReleasePublicKey)
+	if err != nil || len(pub) != ed25519.PublicKeySize {
+		return false
+	}
+	s, err := base64.StdEncoding.DecodeString(strings.TrimSpace(string(sig)))
+	if err != nil || len(s) != ed25519.SignatureSize {
+		return false
+	}
+	return ed25519.Verify(ed25519.PublicKey(pub), manifest, s)
 }

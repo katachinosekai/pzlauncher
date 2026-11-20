@@ -14,6 +14,8 @@ done
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 APPIMAGETOOL="${APPIMAGETOOL:-$HOME/.local/share/appimagetool/appimagetool}"
+SIGNKEY="${SIGNKEY:-$HOME/.signing/pzlauncher-release-ed25519.key}"
+[ -f "$SIGNKEY" ] || { echo "release key $SIGNKEY not found" >&2; exit 1; }
 REPO="katachinosekai/pzlauncher"
 ID="io.github.katachinosekai.pzlauncher"
 OUT="$ROOT/release/v$V"
@@ -42,6 +44,7 @@ names = ["PZLauncher-windows-amd64.exe", "PZLauncher-linux-x86_64.AppImage"]
 m = {"launcher_version": sys.argv[1], "sha256": {n: hashlib.sha256(open(n, "rb").read()).hexdigest() for n in names}}
 json.dump(m, open("manifest.json", "w"), indent=2)
 PY
+(cd "$ROOT" && go run ./tools/relsign sign "$SIGNKEY" "$OUT/manifest.json")
 cat manifest.json
 if [ "$PUBLISH" = 1 ]; then
 	NOTES="$ROOT/release/notes-v$V.md"
@@ -49,5 +52,5 @@ if [ "$PUBLISH" = 1 ]; then
 	git -C "$ROOT" tag -a "v$V" -m "PZ Launcher $V"
 	git -C "$ROOT" push origin "v$V"
 	gh release create "v$V" -R "$REPO" $PRE --title "PZ Launcher $V" --notes-file "$NOTES" \
-		PZLauncher-windows-amd64.exe PZLauncher-linux-x86_64.AppImage manifest.json
+		PZLauncher-windows-amd64.exe PZLauncher-linux-x86_64.AppImage manifest.json manifest.json.sig
 fi

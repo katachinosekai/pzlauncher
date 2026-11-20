@@ -170,3 +170,16 @@ func TestCollect(t *testing.T) {
 		t.Error(ml)
 	}
 }
+
+func TestRedactUserPaths(t *testing.T) {
+	in := `C:\Users\gfrea\Zomboid\console.txt /home/kata/Zomboid "C:/Users/Jordan Ray/x" /run/media/kata/disk/x`
+	out := Redact(in)
+	for _, bad := range []string{"gfrea", "/home/kata", "Jordan", "/run/media/kata"} {
+		if strings.Contains(out, bad) {
+			t.Fatalf("%q left in %q", bad, out)
+		}
+	}
+	if !strings.Contains(out, `C:\Users\<user>\Zomboid`) || !strings.Contains(out, "/home/<user>/Zomboid") {
+		t.Fatalf("paths mangled: %q", out)
+	}
+}

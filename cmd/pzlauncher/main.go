@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"runtime"
 	"time"
 
 	"fyne.io/fyne/v2"
@@ -13,6 +14,7 @@ import (
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/widget"
 
+	"github.com/katachinosekai/pzlauncher/internal/install"
 	"github.com/katachinosekai/pzlauncher/internal/update"
 )
 
@@ -47,6 +49,10 @@ func main() {
 		fmt.Println(version)
 		return
 	}
+	if install.Elevated() && runtime.GOOS != "windows" {
+		fmt.Fprintln(os.Stderr, "PZ Launcher must not run as root (sudo): files it creates in ~/Zomboid would belong to root and break the game. Start it as your normal user.")
+		os.Exit(1)
+	}
 	if *cli.installPack != "" {
 		os.Exit(runCLI(cli))
 	}
@@ -58,10 +64,14 @@ func main() {
 	a.Settings().SetTheme(newAppTheme())
 	w := a.NewWindow("PZ Launcher")
 	u := &ui{app: a, win: w, ctx: ctx, client: update.NewClient()}
+	confirmApprovals = u.askApprovals
 
 	u.loadMusic()
 	tabs := u.buildTabs()
 	a.Lifecycle().SetOnStarted(func() {
+		if install.Elevated() {
+			dialog.ShowInformation("Running as administrator", "PZ Launcher is running as administrator. Installing, changing launch options and restarting Steam are blocked: Steam and the game would start as administrator too. Close the launcher and start it normally.", w)
+		}
 		u.nativeRestore()
 		u.askMusicOnce()
 	})

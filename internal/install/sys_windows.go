@@ -57,3 +57,5 @@ func (osSystem) StartSteam(steamRoot string) error {
 	go cmd.Wait()
 	return nil
 }
+
+func Elevated() bool { return windows.GetCurrentProcessToken().IsElevated() }

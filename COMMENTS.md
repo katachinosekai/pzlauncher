@@ -317,3 +317,12 @@ Update check: quiet check 3 s after start (non-dev only); a newer release turns 
 
 Top tabs: Play, Install / Update, Workshop, Mods, Settings (Tools removed). Mods = sub-tabs Lua mods (`luaModsTab`, the former Mods tab), Java mods, ZombieBuddy. Bottom bar right: Collect logs, Open logs folder, About & credits, Check for updates (becomes "Update to X").
 ZombieBuddy custom jar: pref `zombiebuddy.customJar`; set via the ZombieBuddy tab (VerifyJar + risk warning). While set, `install.Options.ZombieBuddyJar` makes `zbsetup.ApplyCustomJar` replace the Workshop jar copy in the setup plan (bad path = warning and no jar copy at all, never a silent fallback to the official jar); Update installs the custom jar.
+
+## security pass (2026-11-19)
+
+- Signed updates: `update.Latest` requires `manifest.json.sig` (ed25519 over the exact manifest bytes, base64) verified against `update.ReleasePublicKey`; missing or bad signature = `ErrUnsigned`, nothing downloaded. Private key: ~/.signing/pzlauncher-release-ed25519.key (seed, base64, 0600; `go run ./tools/relsign keygen|sign`). Losing it means the next release needs a new public key and one manual download for everyone. release.sh signs and uploads the .sig. v0.1.1 and older releases are unsigned, so builds from now on reject them.
+- Approvals: `install.Options.ConfirmApprovals` gets only the approvals that would be added; GUI shows id + jar hash and asks (Skip = warning, nothing written).
+- Local mods containing "AutoLua.txt" are skipped with a warning (test-only trigger must never reach players).
+- Elevated: `install.Elevated()`; `install.New` refuses (both Run and ZombieBuddy go through it, so install, launch-option edits and Steam restarts are blocked); Linux main refuses to start as root; Windows shows a warning at start.
+- Log redaction also replaces the user folder name in C:\Users\<name>, /home/<name>, /run/media/<name>, /media/<name>.
+- Already fine: zip extraction rejects symlinks, absolute and ../ paths, 4 GiB cap; built-in browser only opens non-Steam http(s)/steam/mailto links externally after a user gesture.

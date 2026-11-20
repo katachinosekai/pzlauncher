@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -187,6 +188,8 @@ func (u *ui) zombieBuddyTab() fyne.CanvasObject {
 	client := zbsetup.NewClient()
 	intro := widget.NewLabel("ZombieBuddy loads Java mods. It is optional: without it, Java mods (and ZBBatch) don't load, everything else works.")
 	intro.Wrapping = fyne.TextWrapWord
+	ghURL, _ := url.Parse("https://github.com/" + zbsetup.Repo)
+	ghLink := widget.NewHyperlink("ZombieBuddy on GitHub (by zed-0xff)", ghURL)
 	status := widget.NewLabel("Checking...")
 	status.Wrapping = fyne.TextWrapWord
 	output := widget.NewLabel("")
@@ -221,14 +224,17 @@ func (u *ui) zombieBuddyTab() fyne.CanvasObject {
 			u.app.Preferences().SetBool(prefZBUse, true)
 		}
 		var opts []string
+		var vers []string
 		choices = nil
 		if s.custom != "" && s.customVer != "" {
 			opts = append(opts, "Custom jar ("+s.customVer+")")
+			vers = append(vers, s.customVer)
 			path, ver := s.custom, s.customVer
 			choices = append(choices, func() (string, string, error) { return path, ver, nil })
 		}
 		if s.workshop != "" {
 			opts = append(opts, "Workshop copy ("+s.workshop+")")
+			vers = append(vers, s.workshop)
 			libs := s.libs
 			choices = append(choices, func() (string, string, error) {
 				f, err := zbsetup.CheckLocal(libs)
@@ -242,6 +248,7 @@ func (u *ui) zombieBuddyTab() fyne.CanvasObject {
 				label += " pre-release"
 			}
 			opts = append(opts, label)
+			vers = append(vers, r.Version)
 			choices = append(choices, func() (string, string, error) {
 				f, err := client.Fetch(u.ctx, r, func(done, total int64) {
 					if total > 0 {
@@ -253,6 +260,12 @@ func (u *ui) zombieBuddyTab() fyne.CanvasObject {
 		}
 		picker.Options = opts
 		picker.ClearSelected()
+		for i, v := range vers {
+			if s.installed != "" && zbsetup.Compare(v, s.installed) == 0 {
+				picker.SetSelectedIndex(i)
+				break
+			}
+		}
 		picker.Refresh()
 		busy(false)
 		if !s.needsUpdate() {
@@ -511,7 +524,7 @@ func (u *ui) zombieBuddyTab() fyne.CanvasObject {
 
 	refresh()
 	top := container.NewVBox(
-		intro,
+		container.NewBorder(nil, nil, nil, ghLink, intro),
 		use,
 		widget.NewSeparator(),
 		status,

@@ -67,3 +67,5 @@ func (osSystem) CloseSteam(ctx context.Context, steamRoot string) error {
 }
 
 func (osSystem) StartSteam(steamRoot string) error { return steamCommand() }
+
+func Elevated() bool { return os.Geteuid() == 0 }
