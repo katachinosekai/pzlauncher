@@ -77,6 +77,7 @@ func main() {
 	})
 	w.SetContent(container.NewBorder(nil, u.aboutBar(), nil, nil, tabs))
 	u.restoreWindow(fyne.NewSize(900, 820))
+	u.watchWindow()
 	w.SetCloseIntercept(func() {
 		u.rememberWindow()
 		w.Close()
@@ -186,6 +187,7 @@ func (u *ui) selfUpdate(rel *update.Release, label *widget.Label) {
 					dialog.ShowError(err, u.win)
 					return
 				}
+				u.rememberWindow()
 				u.app.Quit()
 				os.Exit(0)
 			}, u.win)

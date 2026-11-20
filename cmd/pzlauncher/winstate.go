@@ -3,7 +3,10 @@ package main
 import (
 	"encoding/json"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"syscall"
+	"time"
 
 	"fyne.io/fyne/v2"
 
@@ -74,4 +77,47 @@ func (u *ui) rememberWindow() {
 	s.Width, s.Height = sz.Width, sz.Height
 	nativeSave(u.win, &s)
 	saveWinState(s)
+}
+
+func (u *ui) watchWindow() {
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		<-sig
+		done := make(chan struct{})
+		fyne.Do(func() {
+			u.rememberWindow()
+			close(done)
+		})
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+		}
+		os.Exit(0)
+	}()
+	t := time.NewTicker(5 * time.Second)
+	u.closers = append(u.closers, t.Stop)
+	var last winState
+	go func() {
+		for range t.C {
+			fyne.Do(func() {
+				s := winState{}
+				sz := u.win.Canvas().Size()
+				s.Width, s.Height = sz.Width, sz.Height
+				nativeSave(u.win, &s)
+				if s.Width == last.Width && s.Height == last.Height && s.Maximized == last.Maximized && sameRect(s.Native, last.Native) {
+					return
+				}
+				last = s
+				saveWinState(s)
+			})
+		}
+	}()
+}
+
+func sameRect(a, b *winRect32) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return *a == *b
 }

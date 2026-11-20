@@ -136,6 +136,7 @@ func (s *wsSession) onEvent(e webview.Event) {
 	case webview.EvSignInClosed:
 		s.signingIn = false
 		s.failWaiting("sign-in cancelled")
+		s.refresh()
 	case webview.EvSubResult:
 		p, ok := s.reqs[e.Req]
 		if !ok {
@@ -220,7 +221,7 @@ func (s *wsSession) startSignIn(mode string) {
 		return
 	}
 	if mode == webview.ModeWindow {
-		s.label.SetText("Finish signing in in the Steam window. It closes by itself when you are signed in.")
+		s.label.SetText("Finish signing in to Steam in the Steam window. It closes by itself when you are signed in.")
 		return
 	}
 	s.qrImg = canvas.NewImageFromImage(nil)

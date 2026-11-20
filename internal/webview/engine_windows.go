@@ -236,8 +236,12 @@ func (e *winEngine) layout() {
 	gw := e.scale(44)
 	x := pad
 	for _, b := range []uintptr{e.back, e.fwd, e.reload} {
-		pMoveWindow.Call(b, uintptr(x), uintptr(pad), uintptr(bw), uintptr(bar-2*pad), 1)
-		x += bw + pad
+		w := bw
+		if b == e.reload {
+			w = e.scale(64)
+		}
+		pMoveWindow.Call(b, uintptr(x), uintptr(pad), uintptr(w), uintptr(bar-2*pad), 1)
+		x += w + pad
 	}
 	pMoveWindow.Call(e.secure, uintptr(x), uintptr(pad), uintptr(sw), uintptr(bar-2*pad), 1)
 	x += sw + pad
