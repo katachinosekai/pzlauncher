@@ -16,6 +16,7 @@ import (
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
+	"github.com/katachinosekai/pzlauncher/internal/gamecfg"
 	"github.com/katachinosekai/pzlauncher/internal/install"
 	"github.com/katachinosekai/pzlauncher/internal/update"
 )
@@ -48,6 +49,9 @@ func main() {
 	a := app.NewWithID("io.github.kata.pzlauncher")
 	if m := a.Metadata(); version == "dev" && m.ID != "" && m.Version != "" {
 		version = m.Version
+	}
+	if version == "dev" {
+		gamecfg.DefaultXmxGB = 6
 	}
 	if *showVersion {
 		fmt.Println(version)

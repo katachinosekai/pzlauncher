@@ -14,7 +14,7 @@ import (
 
 const (
 	MinXmxGB         = 2
-	RecommendedXmxGB = 8
+	GameDefaultXmxGB = 3
 	FlagUnlock       = "-XX:+UnlockExperimentalVMOptions"
 	FlagShenUncommit = "-XX:ShenandoahUncommitDelay=30000"
 	softMaxPrefix    = "-XX:SoftMaxHeapSize="
@@ -27,6 +27,10 @@ var (
 )
 
 var ErrNoVMArgs = errors.New("no vmArgs array in ProjectZomboid64.json")
+
+var DefaultXmxGB = GameDefaultXmxGB
+
+func SoftMaxFlag() string { return packSoftMax() }
 
 func PackFlags() []string { return append([]string(nil), install.JVMFlags...) }
 

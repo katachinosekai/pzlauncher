@@ -92,10 +92,33 @@ func memText(mb int) string {
 
 func gbLabel(gb int) string {
 	s := fmt.Sprintf("%d GB", gb)
-	if gb == gamecfg.RecommendedXmxGB {
-		s += " (recommended for big modpacks)"
+	switch {
+	case gb == gamecfg.DefaultXmxGB && gb == gamecfg.GameDefaultXmxGB:
+		s += " (game default)"
+	case gb == gamecfg.DefaultXmxGB:
+		s += " (default)"
+	case gb == gamecfg.GameDefaultXmxGB:
+		s += " (game default)"
 	}
 	return s
+}
+
+const softOff = "Off"
+
+func softOptions(xmxMB int) []string {
+	opts := []string{softOff}
+	for gb := 1; gb*1024 < xmxMB; gb++ {
+		opts = append(opts, fmt.Sprintf("%d GB", gb))
+	}
+	return opts
+}
+
+func softMB(label string) int {
+	var gb int
+	if _, err := fmt.Sscanf(label, "%d GB", &gb); err != nil {
+		return 0
+	}
+	return gb * 1024
 }
 
 func (u *ui) settingsTab() fyne.CanvasObject {
@@ -156,15 +179,31 @@ func (u *ui) settingsTab() fyne.CanvasObject {
 		xmxVal[l] = gb * 1024
 	}
 	xmxSel := widget.NewSelect(xmxOpts, nil)
+	softSel := widget.NewSelect([]string{softOff}, nil)
+	softSel.SetSelected(softOff)
+	xmxSel.OnChanged = func(l string) {
+		mb := xmxVal[l]
+		if mb == 0 {
+			return
+		}
+		cur := softSel.Selected
+		softSel.Options = softOptions(mb)
+		if softMB(cur) >= mb || cur == "" {
+			cur = softOff
+		}
+		softSel.SetSelected(cur)
+		softSel.Refresh()
+	}
+	softNote := newMuted("Soft limit: Java tries to keep the heap below this and gives memory back sooner; the memory limit stays the hard cap.", false)
 
-	softLabel := newMuted(strings.TrimSuffix(softMaxPrefix, "="), true)
 	flagChecks := map[string]*widget.Check{}
 	flagBox := container.NewVBox()
 	for _, f := range gamecfg.PackFlags() {
-		text, raw := f, newMuted(f, true)
 		if strings.HasPrefix(f, softMaxPrefix) {
-			text, raw = "Keep the heap small (soft limit, set below the memory limit)", softLabel
-		} else if h := flagHelp[f]; h != "" {
+			continue
+		}
+		text, raw := f, newMuted(f, true)
+		if h := flagHelp[f]; h != "" {
 			text = h
 		}
 		c := widget.NewCheck(text, nil)
@@ -220,11 +259,12 @@ func (u *ui) settingsTab() fyne.CanvasObject {
 		for f, c := range flagChecks {
 			c.SetChecked(i.Flags[f])
 		}
-		if i.SoftMax != "" {
-			softLabel.SetText(i.SoftMax)
-		} else {
-			softLabel.SetText(strings.TrimSuffix(softMaxPrefix, "="))
+		softSel.Options = softOptions(i.XmxMB)
+		soft := softOff
+		if i.Flags[gamecfg.SoftMaxFlag()] && i.SoftMaxMB > 0 && i.SoftMaxMB%1024 == 0 && i.SoftMaxMB < i.XmxMB {
+			soft = fmt.Sprintf("%d GB", i.SoftMaxMB/1024)
 		}
+		softSel.SetSelected(soft)
 		argsLabel.SetText(strings.Join(i.Args, "\n"))
 	}
 
@@ -242,6 +282,13 @@ func (u *ui) settingsTab() fyne.CanvasObject {
 		w.XmxMB = mb
 		for f, c := range flagChecks {
 			w.Flags[f] = c.Checked
+		}
+		if sm := softMB(softSel.Selected); sm > 0 && sm < mb {
+			w.Flags[gamecfg.SoftMaxFlag()] = true
+			w.SoftMaxMB = sm
+		} else {
+			w.Flags[gamecfg.SoftMaxFlag()] = false
+			w.SoftMaxMB = 0
 		}
 		changed, notes, err := env.SaveJVM(w)
 		if err != nil {
@@ -280,7 +327,10 @@ func (u *ui) settingsTab() fyne.CanvasObject {
 
 	memCard := settingsSection("Memory", "",
 		curLabel, tighten(curDetail.rt),
-		container.NewBorder(nil, nil, widget.NewLabel("Memory limit"), nil, xmxSel),
+		container.NewGridWithColumns(2,
+			container.NewBorder(nil, nil, widget.NewLabel("Memory limit"), nil, xmxSel),
+			container.NewBorder(nil, nil, widget.NewLabel("Soft limit"), nil, softSel)),
+		tighten(softNote.rt),
 		freeLabel, jsonRow)
 	javaCard := settingsSection("Java options", "Memory-saving options from the pack. Other entries in ProjectZomboid64.json are never changed.",
 		flagBox, widget.NewAccordion(widget.NewAccordionItem("All Java options (read-only)", argsLabel)),
