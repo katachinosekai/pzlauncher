@@ -762,7 +762,7 @@ func (u *ui) playTab() fyne.CanvasObject {
 	serversBox := container.NewBorder(widget.NewLabelWithStyle("Servers", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), nil, nil, nil, container.NewStack(serverArea, serverList))
 	lists = container.NewBorder(savesBox, nil, nil, nil, serversBox)
 	bottom := container.NewVBox(statusScroll, container.NewHBox(launch, refreshBtn))
-	return container.NewBorder(nil, bottom, nil, nil, lists)
+	return container.NewBorder(nil, bottom, nil, nil, container.NewVScroll(lists))
 }
 
 func plural(n int, one, many string) string {

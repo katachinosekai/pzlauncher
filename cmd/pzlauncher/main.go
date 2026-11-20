@@ -24,6 +24,7 @@ type ui struct {
 	client   *update.Client
 	closers  []func()
 	tabHooks map[string]func()
+	winSaved winState
 }
 
 func (u *ui) onTab(title string, fn func()) {
@@ -55,9 +56,16 @@ func main() {
 
 	u.loadMusic()
 	tabs := u.buildTabs()
-	a.Lifecycle().SetOnStarted(u.askMusicOnce)
+	a.Lifecycle().SetOnStarted(func() {
+		u.nativeRestore()
+		u.askMusicOnce()
+	})
 	w.SetContent(container.NewBorder(nil, u.aboutBar(), nil, nil, tabs))
-	w.Resize(fyne.NewSize(900, 820))
+	u.restoreWindow(fyne.NewSize(900, 820))
+	w.SetCloseIntercept(func() {
+		u.rememberWindow()
+		w.Close()
+	})
 	w.SetOnClosed(func() {
 		for _, f := range u.closers {
 			f()

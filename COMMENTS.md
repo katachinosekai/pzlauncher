@@ -301,3 +301,8 @@ Optional ZombieBuddy (ZB, Workshop 3619862853, github.com/zed-0xff/ZombieBuddy) 
 - `ReplaceJar` refuses with `ErrGameRunning` (GUI: `install.GameRunning`), backs up to `<jar>.launcher-bak-<oldversion>` (`-2`, `-3` if a different file has that name), copies via temp + rename. Windows while running: offer `StageNew` -> `ZombieBuddy.jar.new`, which zbNative swaps in on start. After any jar change the reminder: Java mods may need re-approval, ZBBatch recalibrates on the next boot.
 - Real system 2026-11-19 (read-only): game-dir jar 2.3.4, Workshop libs jar 2.3.4 (.zbs valid), GitHub newest v2.3.4 (v2.3.3 also listed), launch options `gamemoderun %command% -javaagent:ZombieBuddy.jar -- -` in userdata/205024453 only.
 - Open: on Linux `-javaagent:ZBBatch.jar` stays in ProjectZomboid64.json when ZB is switched off (not a launch option, left alone).
+
+## window state (2026-11-19)
+
+`winstate.go`: `<config>/PZLauncher/window.json` keeps the content size (Fyne units), saved in the close intercept, restored before show (ignored below 600x500). Windows (`winstate_windows.go`): GetWindowPlacement on close (normal rect + maximized), SetWindowPlacement in OnStarted if the rect is still on a monitor. Linux: Fyne/GLFW can't place windows on Wayland; on kata's KDE the position is remembered by a KWin rule (`~/.config/kwinrulesrc` group pzlauncher-remember-position, wmclass io.github.kata.pzlauncher = the Fyne app ID used as Wayland app_id). Changing the app ID breaks that rule.
+Play tab: lists sit in a VScroll so opening save details can't raise the window's min height (was ~500 px closed / ~790 open, cut off the tab bar); now 172.
