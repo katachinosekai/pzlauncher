@@ -169,7 +169,7 @@ func (u *ui) installTab() fyne.CanvasObject {
 
 	top := container.NewVBox(
 		installed,
-		widget.NewLabel("Install or update the fix pack from the PZ-Fixes.zip you were sent. Quit the game first."),
+		widget.NewLabel("Install or update a custom pack from the zip you were sent (for now: the PZ-Fixes pack). Quit the game first."),
 		container.NewBorder(nil, nil, pick, nil, zipLabel),
 		container.NewHBox(install, dryRun),
 		pr.label,

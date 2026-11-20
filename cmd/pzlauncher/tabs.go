@@ -36,7 +36,6 @@ func (u *ui) buildTabs() *container.AppTabs {
 
 func init() {
 	registerTab(10, "Play", (*ui).playTab)
-	registerTab(20, "Install / Update", (*ui).installTab)
 	registerTab(30, "Mods", (*ui).modsTab)
 	registerTab(40, "Settings", (*ui).settingsTab)
 }

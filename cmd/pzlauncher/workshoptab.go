@@ -15,6 +15,7 @@ func (u *ui) modsTab() fyne.CanvasObject {
 		container.NewTabItem("Lua mods", u.luaModsTab()),
 		container.NewTabItem("Java mods", u.javaModsTab()),
 		container.NewTabItem("ZombieBuddy", u.zombieBuddyTab()),
+		container.NewTabItem("Custom Pack", u.installTab()),
 	)
 }
 
