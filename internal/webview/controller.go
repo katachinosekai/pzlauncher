@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"sync"
 	"time"
 )
@@ -87,6 +88,10 @@ func (c *Controller) startLocked() error {
 		cmd.Env = c.Env
 	}
 	cmd.Stderr = os.Stderr
+	if f := openTraceLog(); f != nil {
+		cmd.Stderr = f
+		defer f.Close()
+	}
 	in, err := cmd.StdinPipe()
 	if err != nil {
 		return err
@@ -184,4 +189,24 @@ func (c *Controller) Close() {
 		_ = c.in.Close()
 	}
 	c.cmd, c.in, c.ready = nil, nil, false
+}
+
+func openTraceLog() *os.File {
+	d, err := os.UserConfigDir()
+	if err != nil {
+		return nil
+	}
+	dir := filepath.Join(d, "PZLauncher", "logs")
+	if os.MkdirAll(dir, 0o700) != nil {
+		return nil
+	}
+	p := filepath.Join(dir, "webview.log")
+	if st, err := os.Stat(p); err == nil && st.Size() > 1<<20 {
+		os.Rename(p, p+".old")
+	}
+	f, err := os.OpenFile(p, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		return nil
+	}
+	return f
 }

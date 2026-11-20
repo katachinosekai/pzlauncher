@@ -2,9 +2,11 @@ package webview
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -83,6 +85,7 @@ func (h *Helper) Emit(e Event) {
 
 func (h *Helper) Start(e Engine) {
 	h.eng = e
+	trace("helper started, loading %s", StatusURL)
 	e.Load(StatusURL)
 }
 
@@ -91,6 +94,7 @@ func (h *Helper) Apply(c Command) {
 		return
 	}
 	e := h.eng
+	trace("command %s mode=%s", c.Op, c.Mode)
 	switch c.Op {
 	case OpSignIn:
 		h.requeueCurrent()
@@ -136,6 +140,7 @@ func (h *Helper) Apply(c Command) {
 }
 
 func (h *Helper) emitSession() {
+	trace("session known=%v signedIn=%v", h.known, h.signedIn)
 	if h.known {
 		h.Emit(Event{Event: EvSession, SignedIn: h.signedIn, Name: h.name})
 	}
@@ -216,6 +221,7 @@ func (h *Helper) Decide(raw string, userGesture bool) Action {
 func (h *Helper) ScriptMessage(s string) {
 	m, ok := ParseScriptMessage(s)
 	if !ok || h.eng == nil {
+		trace("script message ignored (parsed=%v engine=%v, %d bytes)", ok, h.eng != nil, len(s))
 		return
 	}
 	switch m.Kind {
@@ -234,6 +240,7 @@ func (h *Helper) ScriptMessage(s string) {
 }
 
 func (h *Helper) page(m ScriptMsg) {
+	trace("page %s signedIn=%v named=%v signing=%v", stripQuery(m.URL), m.SignedIn, m.Name != "", h.sign != signNone)
 	changed := !h.known || h.signedIn != m.SignedIn || (m.SignedIn && m.Name != "" && m.Name != h.name)
 	h.known, h.signedIn = true, m.SignedIn
 	if m.SignedIn {
@@ -303,4 +310,15 @@ func RunHelper(o Options) int {
 		return ExitUnavailable
 	}
 	return 0
+}
+
+func trace(format string, a ...any) {
+	fmt.Fprintf(os.Stderr, time.Now().Format("15:04:05.000 ")+format+"\n", a...)
+}
+
+func stripQuery(u string) string {
+	if i := strings.IndexAny(u, "?#"); i >= 0 {
+		return u[:i]
+	}
+	return u
 }
