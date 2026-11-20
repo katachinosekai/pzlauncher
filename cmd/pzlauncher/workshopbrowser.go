@@ -75,6 +75,11 @@ type wsItem struct {
 	Installed  bool
 	Preview    string
 	Collection bool
+	subs       int64
+	stars      int
+	size       int64
+	updated    int64
+	seq        int
 	sub        workshop.SubState
 }
 
@@ -319,7 +324,7 @@ func (b *wsBrowser) showMenu(it wsItem, e *fyne.PointEvent) {
 	widget.ShowPopUpMenuAtPosition(menu, b.u.win.Canvas(), e.AbsolutePosition)
 }
 
-func (b *wsBrowser) itemList(items *[]wsItem) *widget.List {
+func (b *wsBrowser) itemList(items *[]wsItem, nearEnd func()) *widget.List {
 	var list *widget.List
 	list = widget.NewList(
 		func() int { return len(*items) },
@@ -327,6 +332,9 @@ func (b *wsBrowser) itemList(items *[]wsItem) *widget.List {
 		func(i widget.ListItemID, o fyne.CanvasObject) {
 			if i >= len(*items) {
 				return
+			}
+			if nearEnd != nil && i >= len(*items)-4 {
+				nearEnd()
 			}
 			it := (*items)[i]
 			r := o.(*wsRow)
@@ -439,16 +447,24 @@ func detailsInfo(d workshop.Details) string {
 }
 
 func (b *wsBrowser) browseView(controls fyne.CanvasObject, query func() workshop.BrowseQuery) (fyne.CanvasObject, func()) {
+	view, load, _ := b.browseViewSorted(controls, query, nil)
+	return view, load
+}
+
+func (b *wsBrowser) browseViewSorted(controls fyne.CanvasObject, query func() workshop.BrowseQuery, order func([]wsItem)) (fyne.CanvasObject, func(), func()) {
 	var items []wsItem
-	list := b.itemList(&items)
-	status := widget.NewLabel("")
-	status.Truncation = fyne.TextTruncateEllipsis
 	page := 1
 	var current workshop.BrowseQuery
 	gen := 0
-	more := widget.NewButton("More results", nil)
-	more.Hide()
+	loading, hasMore := false, false
 	var load func(reset bool)
+	list := b.itemList(&items, func() {
+		if !loading && hasMore {
+			load(false)
+		}
+	})
+	status := widget.NewLabel("")
+	status.Truncation = fyne.TextTruncateEllipsis
 	load = func(reset bool) {
 		if reset {
 			current = query()
@@ -460,22 +476,26 @@ func (b *wsBrowser) browseView(controls fyne.CanvasObject, query func() workshop
 		q.Page = page
 		gen++
 		my := gen
-		status.SetText("Loading from the Steam Workshop...")
-		more.Disable()
+		loading = true
+		if reset {
+			status.SetText("Loading from the Steam Workshop...")
+		} else {
+			status.SetText(fmt.Sprintf("Loading more... (%d so far)", len(items)))
+		}
 		go func() {
 			r, err := b.deps.browse(b.u.ctx, q)
 			fyne.Do(func() {
 				if my != gen {
 					return
 				}
-				more.Enable()
+				loading = false
 				if err != nil {
+					hasMore = false
 					status.SetText("Could not load the list: " + err.Error() + " (use \"Open in browser\")")
 					if reset {
 						items = nil
 						list.Refresh()
 					}
-					more.Hide()
 					return
 				}
 				if reset {
@@ -483,7 +503,11 @@ func (b *wsBrowser) browseView(controls fyne.CanvasObject, query func() workshop
 					list.ScrollToTop()
 				}
 				for _, d := range r.Items {
-					items = append(items, wsItem{ID: d.ID, Title: d.Title, Info: detailsInfo(d), Preview: d.Preview, Collection: d.Collection || q.Collections})
+					items = append(items, wsItem{ID: d.ID, Title: d.Title, Info: detailsInfo(d), Preview: d.Preview, Collection: d.Collection || q.Collections, subs: d.Subscriptions, stars: d.Stars, size: d.Size, updated: d.Updated.Unix(), seq: len(items)})
+				}
+				hasMore = r.TotalPages > page && len(r.Items) > 0
+				if order != nil {
+					order(items)
 				}
 				list.Refresh()
 				kind := "items"
@@ -491,20 +515,20 @@ func (b *wsBrowser) browseView(controls fyne.CanvasObject, query func() workshop
 					kind = "collections"
 				}
 				status.SetText(fmt.Sprintf("%s: showing %d of %d %s.", q.Sort, len(items), r.Total, kind))
-				if r.TotalPages > page && len(r.Items) > 0 {
-					more.Show()
-				} else {
-					more.Hide()
-				}
 			})
 		}()
 	}
-	more.OnTapped = func() { load(false) }
 	openBrowse := widget.NewButtonWithIcon("Open in browser", theme.ComputerIcon(), func() {
 		b.openExternal(workshop.BrowseURL("", query()))
 	})
 	top := container.NewVBox(container.NewBorder(nil, nil, nil, openBrowse, controls), status)
-	return container.NewBorder(top, container.NewCenter(more), nil, nil, list), func() { load(true) }
+	resort := func() {
+		if order != nil {
+			order(items)
+			list.Refresh()
+		}
+	}
+	return container.NewBorder(top, nil, nil, nil, list), func() { load(true) }, resort
 }
 
 func (b *wsBrowser) collectionsTab() (fyne.CanvasObject, func()) {
@@ -539,16 +563,39 @@ func (b *wsBrowser) popularTab() (fyne.CanvasObject, func()) {
 	radio.Horizontal = true
 	radio.Required = true
 	radio.SetSelected(opts[0])
+	sortNames := []string{"Steam order", "Name", "Subscribers", "Rating", "Size", "Last updated"}
+	sortSel := widget.NewSelect(sortNames, nil)
+	sortSel.SetSelected(sortNames[0])
+	order := func(items []wsItem) {
+		var less func(a, b wsItem) bool
+		switch sortSel.Selected {
+		case "Name":
+			less = func(a, b wsItem) bool { return strings.ToLower(a.displayTitle()) < strings.ToLower(b.displayTitle()) }
+		case "Subscribers":
+			less = func(a, b wsItem) bool { return a.subs > b.subs }
+		case "Rating":
+			less = func(a, b wsItem) bool { return a.stars > b.stars }
+		case "Size":
+			less = func(a, b wsItem) bool { return a.size > b.size }
+		case "Last updated":
+			less = func(a, b wsItem) bool { return a.updated > b.updated }
+		default:
+			less = func(a, b wsItem) bool { return a.seq < b.seq }
+		}
+		sort.SliceStable(items, func(i, j int) bool { return less(items[i], items[j]) })
+	}
 	var load func()
 	refresh := widget.NewButtonWithIcon("Refresh", theme.ViewRefreshIcon(), func() { load() })
-	view, l := b.browseView(container.NewBorder(nil, nil, nil, refresh, radio), func() workshop.BrowseQuery {
+	controls := container.NewBorder(nil, nil, nil, container.NewHBox(widget.NewLabel("Sort by"), sortSel, refresh), radio)
+	view, l, resort := b.browseViewSorted(controls, func() workshop.BrowseQuery {
 		if radio.Selected == opts[1] {
 			return workshop.BrowseQuery{Sort: workshop.SortRecent}
 		}
 		return workshop.BrowseQuery{Sort: workshop.SortTrendWeek}
-	})
+	}, order)
 	load = l
 	radio.OnChanged = func(string) { load() }
+	sortSel.OnChanged = func(string) { resort() }
 	return view, load
 }
 
@@ -620,7 +667,7 @@ func subItems(subs []workshop.Sub, det map[string]workshop.Details, local map[st
 
 func (b *wsBrowser) subsTab() (fyne.CanvasObject, func()) {
 	var items []wsItem
-	list := b.itemList(&items)
+	list := b.itemList(&items, nil)
 	summary := widget.NewLabel("")
 	summary.Wrapping = fyne.TextWrapWord
 	var refresh *widget.Button
@@ -696,7 +743,7 @@ func (b *wsBrowser) collectionView(fixed string) (fyne.CanvasObject, func()) {
 		return c
 	}
 	var items []wsItem
-	list := b.itemList(&items)
+	list := b.itemList(&items, nil)
 	summary := widget.NewLabel("")
 	summary.Wrapping = fyne.TextWrapWord
 	progress := widget.NewLabel("")
