@@ -17,6 +17,7 @@ var ErrGameRunning = errors.New("Project Zomboid is running; quit the game befor
 var ErrNothingRemembered = errors.New("no memory settings remembered yet; save them once first")
 
 type Env struct {
+	JSONFile   string
 	GameDir    string
 	ZomboidDir string
 	ConfigDir  string
@@ -50,7 +51,12 @@ func DefaultEnv() (Env, []error) {
 	return e, errs
 }
 
-func (e Env) JSONPath() string     { return filepath.Join(e.GameDir, "ProjectZomboid64.json") }
+func (e Env) JSONPath() string {
+	if e.JSONFile != "" {
+		return e.JSONFile
+	}
+	return filepath.Join(e.GameDir, "ProjectZomboid64.json")
+}
 func (e Env) OptionsPath() string  { return filepath.Join(e.ZomboidDir, "options.ini") }
 func (e Env) RememberPath() string { return filepath.Join(e.ConfigDir, "settings.json") }
 

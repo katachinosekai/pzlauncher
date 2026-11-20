@@ -14,6 +14,7 @@ import (
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/layout"
+	"fyne.io/fyne/v2/storage"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
@@ -103,7 +104,10 @@ func gbLabel(gb int) string {
 	return s
 }
 
-const softOff = "Off"
+const (
+	softOff        = "Off"
+	prefCustomJSON = "settings.customJSON"
+)
 
 func softOptions(xmxMB int) []string {
 	opts := []string{softOff}
@@ -166,10 +170,32 @@ func (u *ui) settingsTab() fyne.CanvasObject {
 	curLabel := widget.NewLabel("")
 	curLabel.Wrapping = fyne.TextWrapWord
 	curDetail := newMuted("", true)
-	jsonName := widget.NewLabel("Where your ProjectZomboid64.json file lives")
+	env.JSONFile = u.app.Preferences().String(prefCustomJSON)
+	jsonName := widget.NewLabel("")
 	jsonPath := newMuted("", true)
+	var loadJVM func()
 	openJSON := widget.NewButtonWithIcon("Open folder", theme.FolderOpenIcon(), func() { u.openFolder(filepath.Dir(env.JSONPath())) })
-	jsonRow := container.NewBorder(nil, nil, nil, container.NewCenter(openJSON), container.NewVBox(jsonName, tighten(jsonPath.rt)))
+	autoJSON := widget.NewButton("Use automatic", func() {
+		u.app.Preferences().SetString(prefCustomJSON, "")
+		env.JSONFile = ""
+		loadJVM()
+	})
+	customJSON := widget.NewButton("Use a custom file...", func() {
+		d := dialog.NewFileOpen(func(r fyne.URIReadCloser, err error) {
+			if err != nil || r == nil {
+				return
+			}
+			r.Close()
+			p := r.URI().Path()
+			u.app.Preferences().SetString(prefCustomJSON, p)
+			env.JSONFile = p
+			loadJVM()
+		}, u.win)
+		d.SetFilter(storage.NewExtensionFileFilter([]string{".json"}))
+		d.Show()
+	})
+	jsonButtons := container.NewHBox(customJSON, openJSON, autoJSON)
+	jsonRow := container.NewBorder(nil, nil, nil, container.NewCenter(jsonButtons), container.NewVBox(jsonName, tighten(jsonPath.rt)))
 
 	var xmxOpts []string
 	xmxVal := map[string]int{}
@@ -217,16 +243,31 @@ func (u *ui) settingsTab() fyne.CanvasObject {
 	var info gamecfg.JVMInfo
 	jvmOK := false
 
-	loadJVM := func() {
+	loadJVM = func() {
 		jvmOK = false
 		curDetail.SetText("")
-		if env.GameDir == "" {
+		if env.GameDir == "" && env.JSONFile == "" {
 			curLabel.SetText("Project Zomboid install not found.")
-			jsonRow.Hide()
+			jsonName.SetText("ProjectZomboid64.json not found automatically")
+			jsonPath.SetText("")
+			customJSON.Show()
+			openJSON.Hide()
+			autoJSON.Hide()
 			argsLabel.SetText("")
 			return
 		}
 		jsonPath.SetText(shortPath(env.JSONPath()))
+		if env.JSONFile != "" {
+			jsonName.SetText("Custom ProjectZomboid64.json")
+			customJSON.Hide()
+			openJSON.Show()
+			autoJSON.Show()
+		} else {
+			jsonName.SetText("ProjectZomboid64.json (found automatically)")
+			customJSON.Show()
+			openJSON.Hide()
+			autoJSON.Hide()
+		}
 		jsonRow.Show()
 		i, err := env.LoadJVM()
 		if err != nil {
