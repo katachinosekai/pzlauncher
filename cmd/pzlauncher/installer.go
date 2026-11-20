@@ -19,6 +19,7 @@ func realInstall(ctx context.Context, packDir string, dryRun bool, log func(stri
 		DryRun:           dryRun,
 		Log:              log,
 		SetupZombieBuddy: zbWanted(),
+		ZombieBuddyJar:   zbCustomJar(),
 		BackupRoot:       installDataDir("install-backups"),
 		LogDir:           installDataDir("install-logs"),
 		OnWait: func(w install.WaitStatus) {

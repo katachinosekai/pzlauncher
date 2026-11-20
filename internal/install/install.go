@@ -59,6 +59,7 @@ type Options struct {
 	OnWait                 func(WaitStatus)
 	Now                    func() time.Time
 	SetupZombieBuddy       bool
+	ZombieBuddyJar         string
 	RemoveZombieBuddy      bool
 	RemoveZombieBuddyFiles bool
 }

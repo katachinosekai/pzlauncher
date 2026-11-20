@@ -118,3 +118,28 @@ func RemovePlan(gameDir string, configs []ConfigFile, deleteFiles bool) Plan {
 	}
 	return p
 }
+
+func ApplyCustomJar(p *Plan, gameDir, custom string) {
+	if custom == "" {
+		return
+	}
+	kept := p.Copies[:0]
+	for _, c := range p.Copies {
+		if c.Name != JarName {
+			kept = append(kept, c)
+		}
+	}
+	p.Copies = kept
+	info, err := VerifyJar(custom)
+	if err != nil {
+		p.Warnings = append(p.Warnings, fmt.Sprintf("custom ZombieBuddy jar %s: %v; not copied", custom, err))
+		return
+	}
+	dst := filepath.Join(gameDir, JarName)
+	switch {
+	case !isFile(dst):
+		p.Copies = append(p.Copies, FileCopy{Name: JarName, Src: custom, Dst: dst, ToVersion: info.Version})
+	case !sameBytes(custom, dst):
+		p.Copies = append(p.Copies, FileCopy{Name: JarName, Src: custom, Dst: dst, FromVersion: JarVersion(dst), ToVersion: info.Version, Replace: true})
+	}
+}

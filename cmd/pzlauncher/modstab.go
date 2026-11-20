@@ -67,7 +67,7 @@ type modsTab struct {
 	mapList    *widget.List
 }
 
-func (u *ui) modsTab() fyne.CanvasObject {
+func (u *ui) luaModsTab() fyne.CanvasObject {
 	t := &modsTab{u: u, orderSel: -1, mapSel: -1,
 		icons:   modlist.NewImageCache(48, 4),
 		posters: modlist.NewImageCache(640, 2),

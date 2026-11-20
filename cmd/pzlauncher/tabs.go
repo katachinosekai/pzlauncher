@@ -39,5 +39,4 @@ func init() {
 	registerTab(20, "Install / Update", (*ui).installTab)
 	registerTab(30, "Mods", (*ui).modsTab)
 	registerTab(40, "Settings", (*ui).settingsTab)
-	registerTab(50, "Tools", (*ui).toolsTab)
 }

@@ -85,7 +85,7 @@ func (u *ui) aboutBar() fyne.CanvasObject {
 	var btn *widget.Button
 	var rel *update.Release
 	var check func(quiet bool)
-	btn = widget.NewButton("Check for launcher update", func() {
+	btn = widget.NewButton("Check for updates", func() {
 		if rel != nil {
 			r := rel
 			dialog.ShowConfirm("Launcher update", fmt.Sprintf("Update the launcher from %s to %s?", version, r.Manifest.LauncherVersion), func(ok bool) {
@@ -148,7 +148,10 @@ func (u *ui) aboutBar() fyne.CanvasObject {
 	note := widget.NewLabel(disclaimer)
 	note.Truncation = fyne.TextTruncateEllipsis
 	about := widget.NewButton("About & credits", u.showAbout)
-	return container.NewBorder(nil, nil, label, container.NewHBox(about, btn), note)
+	var collect *widget.Button
+	collect = widget.NewButton("Collect logs", func() { u.collectLogs(collect) })
+	openLogs := widget.NewButton("Open logs folder", u.openLogsFolder)
+	return container.NewBorder(nil, nil, label, container.NewHBox(collect, openLogs, about, btn), note)
 }
 
 func (u *ui) selfUpdate(rel *update.Release, label *widget.Label) {

@@ -10,14 +10,15 @@ Get the latest release from the [Releases page](https://github.com/katachinoseka
 - Windows: `PZLauncher-windows-amd64.exe`
 - Linux: `PZLauncher-linux-x86_64.AppImage` (`chmod +x` it first)
 
-The launcher can update itself (bottom bar > Check for launcher update).
+The launcher can update itself (bottom bar > Check for updates).
 
 ## Features
 
 - **Play**: saves and servers with pre-launch checks (game version, missing mods, server status), launch straight into a save or server
 - **Install / Update**: installs a `PZ-Fixes.zip` fix pack (Workshop collection, settings, ZombieBuddy approvals, memory settings, ZBBatch); dry run shows what would change; backups of everything it replaces
 - **Workshop**: search and browse the Workshop, your subscriptions and the pack collection; subscribe in the background after signing in on Steam's own page
-- **Mods**, **Settings** (memory, Java options), **Tools** (ZombieBuddy setup, Java mod approvals, log collection, save backups)
+- **Mods**: Lua mods (mod list, load order, presets), Java mods (ZombieBuddy approvals) and ZombieBuddy setup (version picker, custom jar)
+- **Settings**: memory, Java options, game options; log collection from the bottom bar
 
 ## Build
 

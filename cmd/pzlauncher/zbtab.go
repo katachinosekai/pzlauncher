@@ -11,6 +11,7 @@ import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
+	"fyne.io/fyne/v2/storage"
 	"fyne.io/fyne/v2/widget"
 
 	"github.com/katachinosekai/pzlauncher/internal/install"
@@ -20,7 +21,18 @@ import (
 	"github.com/katachinosekai/pzlauncher/internal/zbsetup"
 )
 
-const prefZBUse = "zombiebuddy.use"
+const (
+	prefZBUse    = "zombiebuddy.use"
+	prefZBCustom = "zombiebuddy.customJar"
+)
+
+func zbCustomJar() string {
+	a := fyne.CurrentApp()
+	if a == nil {
+		return ""
+	}
+	return strings.TrimSpace(a.Preferences().String(prefZBCustom))
+}
 
 func zbWanted() bool {
 	a := fyne.CurrentApp()
@@ -37,6 +49,8 @@ type zbStatus struct {
 	enabled   bool
 	rels      []zbsetup.Release
 	relNote   string
+	custom    string
+	customVer string
 	err       error
 }
 
@@ -51,11 +65,19 @@ func (s zbStatus) best() string {
 }
 
 func (s zbStatus) needsUpdate() bool {
+	if s.custom != "" {
+		return s.customVer != "" && s.customVer != s.installed
+	}
 	return s.installed != "" && zbsetup.Newer(s.best(), s.installed)
 }
 
 func loadZBStatus(u *ui, client *zbsetup.Client) zbStatus {
 	var s zbStatus
+	if s.custom = zbCustomJar(); s.custom != "" {
+		if info, err := zbsetup.VerifyJar(s.custom); err == nil {
+			s.customVer = info.Version
+		}
+	}
 	root, err := paths.SteamRoot()
 	if err != nil {
 		s.err = err
@@ -128,7 +150,16 @@ func (s zbStatus) text() string {
 		latest = l.Tag
 	}
 	fmt.Fprintf(&b, "Newest GitHub release: %s%s\n", latest, s.relNote)
+	if s.custom != "" {
+		v := s.customVer
+		if v == "" {
+			v = "not a valid ZombieBuddy jar"
+		}
+		fmt.Fprintf(&b, "Custom jar in use: %s (%s). Update and the pack install use it instead of the Workshop or GitHub copies.\n", s.custom, v)
+	}
 	switch {
+	case s.custom != "" && s.needsUpdate():
+		fmt.Fprintf(&b, "The game folder has %s; Update installs your custom jar (%s).\n", or(s.installed, "no ZombieBuddy"), s.customVer)
 	case s.installed == "":
 		b.WriteString("ZombieBuddy is not in the game folder yet.\n")
 	case s.needsUpdate():
@@ -191,6 +222,11 @@ func (u *ui) zombieBuddyTab() fyne.CanvasObject {
 		}
 		var opts []string
 		choices = nil
+		if s.custom != "" && s.customVer != "" {
+			opts = append(opts, "Custom jar ("+s.customVer+")")
+			path, ver := s.custom, s.customVer
+			choices = append(choices, func() (string, string, error) { return path, ver, nil })
+		}
 		if s.workshop != "" {
 			opts = append(opts, "Workshop copy ("+s.workshop+")")
 			libs := s.libs
@@ -241,6 +277,7 @@ func (u *ui) zombieBuddyTab() fyne.CanvasObject {
 			PackDir:                zbWorkDir(),
 			DryRun:                 dry,
 			SetupZombieBuddy:       on,
+			ZombieBuddyJar:         zbCustomJar(),
 			RemoveZombieBuddy:      !on,
 			RemoveZombieBuddyFiles: deleteFiles,
 		})
@@ -400,6 +437,12 @@ func (u *ui) zombieBuddyTab() fyne.CanvasObject {
 		if len(choices) == 0 {
 			return
 		}
+		if cur.custom != "" {
+			if cur.customVer != "" {
+				installJar(choices[0])
+			}
+			return
+		}
 		best := cur.best()
 		if cur.workshop != "" && zbsetup.Compare(cur.workshop, best) >= 0 {
 			installJar(choices[0])
@@ -417,6 +460,55 @@ func (u *ui) zombieBuddyTab() fyne.CanvasObject {
 		}
 	}
 
+	customEntry := widget.NewEntry()
+	customEntry.SetPlaceHolder("Path to your own ZombieBuddy.jar (leave empty to use the official one)")
+	customEntry.SetText(zbCustomJar())
+	setCustom := func(p string) {
+		u.app.Preferences().SetString(prefZBCustom, p)
+		customEntry.SetText(p)
+		if p == "" {
+			output.SetText("Custom ZombieBuddy jar cleared: the official Workshop or GitHub copy is used again.")
+		} else {
+			output.SetText("Custom ZombieBuddy jar set: " + p + ". Press Update to install it in the game folder.")
+		}
+		refresh()
+	}
+	useCustom := func() {
+		p := strings.TrimSpace(customEntry.Text)
+		if p == "" {
+			setCustom("")
+			return
+		}
+		info, err := zbsetup.VerifyJar(p)
+		if err != nil {
+			dialog.ShowError(fmt.Errorf("%s: %w", p, err), u.win)
+			return
+		}
+		dialog.ShowConfirm("Use a custom ZombieBuddy jar?",
+			"ZombieBuddy "+info.Version+" from\n"+p+"\n\nThis is not an official ZombieBuddy release. ZombieBuddy runs inside the game with full access to your PC: only use builds you trust (your own or from someone you know).\n\nWhile it is set, Update and the pack install use this jar instead of the Workshop or GitHub copies.",
+			func(ok bool) {
+				if ok {
+					setCustom(p)
+				}
+			}, u.win)
+	}
+	browse := widget.NewButton("Browse...", func() {
+		d := dialog.NewFileOpen(func(r fyne.URIReadCloser, err error) {
+			if err != nil || r == nil {
+				return
+			}
+			r.Close()
+			customEntry.SetText(r.URI().Path())
+			useCustom()
+		}, u.win)
+		d.SetFilter(storage.NewExtensionFileFilter([]string{".jar"}))
+		d.Show()
+	})
+	customEntry.OnSubmitted = func(string) { useCustom() }
+	useBtn := widget.NewButton("Use", useCustom)
+	clearBtn := widget.NewButton("Clear", func() { setCustom("") })
+	customRow := container.NewBorder(nil, nil, widget.NewLabel("Custom jar"), container.NewHBox(browse, useBtn, clearBtn), customEntry)
+
 	refresh()
 	top := container.NewVBox(
 		intro,
@@ -425,6 +517,7 @@ func (u *ui) zombieBuddyTab() fyne.CanvasObject {
 		status,
 		container.NewHBox(refreshBtn, updateBtn),
 		container.NewBorder(nil, nil, widget.NewLabel("Version"), installBtn, picker),
+		customRow,
 		widget.NewSeparator(),
 	)
 	return container.NewBorder(top, nil, nil, nil, container.NewVScroll(output))

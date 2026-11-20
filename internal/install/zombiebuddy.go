@@ -71,7 +71,9 @@ func (in *Installer) zbConfigs() []zbsetup.ConfigFile {
 func (in *Installer) zbPlan() zbsetup.Plan {
 	configs := in.zbConfigs()
 	if in.opts.SetupZombieBuddy {
-		return zbsetup.SetupPlan(in.opts.GOOS, in.gameDir, in.zbLibs(), configs)
+		p := zbsetup.SetupPlan(in.opts.GOOS, in.gameDir, in.zbLibs(), configs)
+		zbsetup.ApplyCustomJar(&p, in.gameDir, in.opts.ZombieBuddyJar)
+		return p
 	}
 	return zbsetup.RemovePlan(in.gameDir, configs, in.opts.RemoveZombieBuddyFiles)
 }

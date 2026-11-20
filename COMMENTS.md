@@ -312,3 +312,8 @@ Play tab: lists sit in a VScroll so opening save details can't raise the window'
 `scripts/release.sh <version> [--publish] [--prerelease]`: fyne-cross windows + linux with `-app-version`, AppImage via appimagetool (`APPIMAGETOOL`, default ~/.local/share/appimagetool/appimagetool), checks the AppImage's `-version`, writes manifest.json, and with --publish tags v<version>, pushes the tag and creates the GitHub release from `release/notes-v<version>.md`. Output in release/v<version>/ (gitignored).
 Version: fyne-cross ignores `-ldflags -X`, so `main.version` stays "dev" in packaged builds; main takes `a.Metadata().Version` when the packaged metadata has an ID (fyne package writes it; plain `go build` has none, so dev builds stay "dev" and never self-update). v0.1.0 binaries report "dev" and can't self-update: v0.1.0 users must download once by hand.
 Update check: quiet check 3 s after start (non-dev only); a newer release turns the bottom-bar button into "Update to X". `/releases/latest` skips pre-releases, so test builds are never offered.
+
+## layout (2026-11-19)
+
+Top tabs: Play, Install / Update, Workshop, Mods, Settings (Tools removed). Mods = sub-tabs Lua mods (`luaModsTab`, the former Mods tab), Java mods, ZombieBuddy. Bottom bar right: Collect logs, Open logs folder, About & credits, Check for updates (becomes "Update to X").
+ZombieBuddy custom jar: pref `zombiebuddy.customJar`; set via the ZombieBuddy tab (VerifyJar + risk warning). While set, `install.Options.ZombieBuddyJar` makes `zbsetup.ApplyCustomJar` replace the Workshop jar copy in the setup plan (bad path = warning and no jar copy at all, never a silent fallback to the official jar); Update installs the custom jar.

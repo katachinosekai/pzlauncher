@@ -318,3 +318,21 @@ func TestPlans(t *testing.T) {
 		t.Fatalf("%+v", p)
 	}
 }
+
+func TestApplyCustomJar(t *testing.T) {
+	game, libs, own := t.TempDir(), t.TempDir(), t.TempDir()
+	makeJar(t, filepath.Join(libs, JarName), "2.3.4", PremainClass)
+	makeJar(t, filepath.Join(game, JarName), "2.3.0", PremainClass)
+	custom := filepath.Join(own, "MyZB.jar")
+	makeJar(t, custom, "2.3.1-custom", PremainClass)
+	p := SetupPlan("linux", game, libs, nil)
+	ApplyCustomJar(&p, game, custom)
+	if len(p.Copies) != 1 || p.Copies[0].Src != custom || !p.Copies[0].Replace || p.Copies[0].ToVersion != "2.3.1-custom" {
+		t.Fatalf("custom jar not used: %+v", p.Copies)
+	}
+	p = SetupPlan("linux", game, libs, nil)
+	ApplyCustomJar(&p, game, filepath.Join(own, "missing.jar"))
+	if len(p.Copies) != 0 || len(p.Warnings) == 0 {
+		t.Fatalf("bad custom jar must block the Workshop copy and warn: %+v", p)
+	}
+}

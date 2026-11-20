@@ -10,13 +10,12 @@ import (
 
 const prefCollection = "workshop.collection"
 
-func (u *ui) toolsTab() fyne.CanvasObject {
-	inner := container.NewAppTabs(
+func (u *ui) modsTab() fyne.CanvasObject {
+	return container.NewAppTabs(
+		container.NewTabItem("Lua mods", u.luaModsTab()),
 		container.NewTabItem("Java mods", u.javaModsTab()),
-		container.NewTabItem("Logs", u.logsTab()),
 		container.NewTabItem("ZombieBuddy", u.zombieBuddyTab()),
 	)
-	return inner
 }
 
 func (u *ui) openURL(url string) {
