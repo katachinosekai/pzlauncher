@@ -200,11 +200,14 @@ func PageScript(post string) string {
 		`}` +
 		QRFinderJS +
 		`function run(){` +
-		`var sid=window.g_steamID;var signed=typeof sid==='string'&&sid.length>0;` +
-		`var n=document.querySelector('#account_pulldown');` +
+		`var sid=window.g_steamID;var signed=typeof sid==='string'&&sid.length>0;var name='';` +
+		`if(!signed){try{var sd=document.getElementById('valve-ssr-data');if(sd){var cfg=JSON.parse(sd.textContent).UserConfig;signed=!!(cfg&&cfg.logged_in&&cfg.steamid&&cfg.steamid!=='0');}}catch(e){}}` +
+		`if(!signed){try{var ac=document.getElementById('application_config');var ui=ac&&ac.getAttribute('data-userinfo');if(ui){var u=JSON.parse(ui);signed=!!(u&&u.logged_in&&u.steamid&&u.steamid!=='0');}}catch(e){}}` +
+		`var n=document.querySelector('#account_pulldown');if(n)name=n.textContent;` +
+		`if(!name){var pn=document.querySelector('[class*="persona_name"],[class*="PersonaName"]');if(pn)name=pn.textContent;}` +
 		`var m=/[?&]id=(\d+)/.exec(location.search);` +
 		`var item=(m&&/\/(sharedfiles|workshop)\/filedetails/.test(location.pathname))?m[1]:'';` +
-		`post({kind:'page',url:location.href,signedIn:signed,name:n?n.textContent:'',item:item});` +
+		`post({kind:'page',url:location.href,signedIn:signed,name:(name||'').trim(),item:item});` +
 		`if(login){var last='';setInterval(function(){var u=findQR();var k=u+'|'+chal;if((u||chal)&&k!==last){last=k;post({kind:'qr',image:u,challenge:chal});}},1000);}` +
 		`}` +
 		`if(document.readyState==='loading'){document.addEventListener('DOMContentLoaded',run);}else{run();}` +
