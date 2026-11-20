@@ -51,6 +51,7 @@ type wsSession struct {
 func newWSSession(b *wsBrowser) *wsSession {
 	s := &wsSession{b: b, reqs: map[int]wsPending{}}
 	s.label = widget.NewLabel("Steam sign-in: not checked yet.")
+	s.label.Wrapping = fyne.TextWrapWord
 	s.label.Truncation = fyne.TextTruncateEllipsis
 	s.signInBtn = widget.NewButtonWithIcon("Sign in to Steam", theme.LoginIcon(), func() { s.askSignIn() })
 	s.signOutBtn = widget.NewButtonWithIcon("Sign out", theme.LogoutIcon(), func() { s.signOut() })
@@ -94,7 +95,7 @@ func (s *wsSession) refresh() {
 	case !s.known:
 		s.label.SetText("Steam sign-in: checking...")
 	case s.signedIn:
-		who := "Signed in"
+		who := "Subscribe/Unsubscribe: signed in to Steam"
 		if s.name != "" {
 			who += " as " + s.name
 		}
@@ -105,7 +106,11 @@ func (s *wsSession) refresh() {
 		}
 		s.label.SetText(who)
 	default:
-		s.label.SetText("Not signed in to Steam.")
+		msg := "Subscribe/Unsubscribe: not signed in to Steam. Your subscription list doesn't need this; it comes from Steam's files on this PC."
+		if !s.remember() {
+			msg += " Tick \"Remember me\" when signing in to stay signed in after the launcher closes."
+		}
+		s.label.SetText(msg)
 	}
 	if s.signedIn && !s.fallback {
 		s.signInBtn.Hide()
