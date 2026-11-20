@@ -88,7 +88,7 @@ func (c *Controller) startLocked() error {
 		cmd.Env = c.Env
 	}
 	cmd.Stderr = os.Stderr
-	if f := openTraceLog(); f != nil {
+	if f := openTraceLog(); f != nil && c.Exe == "" {
 		cmd.Stderr = f
 		defer f.Close()
 	}

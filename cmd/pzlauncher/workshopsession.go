@@ -16,8 +16,7 @@ import (
 )
 
 const (
-	prefRemember = "workshop.rememberSignIn"
-	resOpened    = "opened"
+	resOpened = "opened"
 )
 
 type wsPending struct {
@@ -58,10 +57,6 @@ func newWSSession(b *wsBrowser) *wsSession {
 	return s
 }
 
-func (s *wsSession) remember() bool {
-	return s.b.u.app.Preferences().BoolWithFallback(prefRemember, false)
-}
-
 func (s *wsSession) args() []string {
 	if s.ephemeral {
 		return []string{webview.HelperFlag, webview.EphemeralFlag}
@@ -74,7 +69,7 @@ func (s *wsSession) ensure() {
 		return
 	}
 	s.started = true
-	s.ephemeral = !s.remember()
+	s.ephemeral = false
 	s.b.ctl.Args = s.args()
 	s.label.SetText("Steam sign-in: checking...")
 	s.send(webview.Command{Op: webview.OpState})
@@ -97,11 +92,6 @@ func (s *wsSession) refresh() {
 		who := "Signed in to Steam"
 		if s.name != "" {
 			who += " as " + s.name
-		}
-		if s.ephemeral {
-			who += " (this session only)"
-		} else {
-			who += " (remembered)"
 		}
 		s.label.SetText(who)
 	default:
@@ -221,55 +211,7 @@ func (s *wsSession) askSignIn() {
 		s.failWaiting("built-in browser unavailable")
 		return
 	}
-	s.signingIn = true
-	var d *dialog.CustomDialog
-	chosen := false
-	rememberChk := widget.NewCheck("Remember me (stay signed in after the launcher closes)", nil)
-	rememberChk.SetChecked(s.remember())
-	text := widget.NewLabel("Sign in once so the launcher can subscribe to mods for you. Steam handles the sign-in itself; the launcher never sees your password.")
-	text.Wrapping = fyne.TextWrapWord
-	pick := func(mode string) {
-		chosen = true
-		d.Hide()
-		s.applyRemember(rememberChk.Checked, func() { s.startSignIn(mode) })
-	}
-	qr := widget.NewButtonWithIcon("Sign in with the Steam Mobile app (QR code)", theme.ComputerIcon(), func() { pick(webview.ModeQR) })
-	qr.Importance = widget.HighImportance
-	page := widget.NewButtonWithIcon("Sign in with Steam's login page", theme.LoginIcon(), func() { pick(webview.ModeWindow) })
-	cancel := widget.NewButton("Cancel", func() { d.Hide() })
-	content := container.NewVBox(text, qr, page, rememberChk, container.NewHBox(cancel))
-	d = dialog.NewCustomWithoutButtons("Sign in to Steam", content, s.b.u.win)
-	d.SetOnClosed(func() {
-		if !chosen {
-			s.signingIn = false
-			s.failWaiting("sign-in cancelled")
-		}
-	})
-	d.Resize(fyne.NewSize(520, 0))
-	d.Show()
-}
-
-func (s *wsSession) applyRemember(on bool, then func()) {
-	s.b.u.app.Preferences().SetBool(prefRemember, on)
-	if s.ephemeral == !on {
-		then()
-		return
-	}
-	s.label.SetText("Steam sign-in: switching the browser profile...")
-	go func() {
-		s.b.ctl.CloseWait(5 * time.Second)
-		if !on {
-			_ = os.RemoveAll(webview.DataDir())
-			_ = os.RemoveAll(webview.CacheDir())
-		}
-		fyne.Do(func() {
-			s.ephemeral = !on
-			s.b.ctl.Args = s.args()
-			s.known, s.signedIn, s.name = false, false, ""
-			s.refresh()
-			then()
-		})
-	}()
+	s.startSignIn(webview.ModeWindow)
 }
 
 func (s *wsSession) startSignIn(mode string) {

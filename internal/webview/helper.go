@@ -240,7 +240,7 @@ func (h *Helper) ScriptMessage(s string) {
 }
 
 func (h *Helper) page(m ScriptMsg) {
-	trace("page %s signedIn=%v named=%v signing=%v", stripQuery(m.URL), m.SignedIn, m.Name != "", h.sign != signNone)
+	trace("page %s signedIn=%v named=%v signing=%v %s", stripQuery(m.URL), m.SignedIn, m.Name != "", h.sign != signNone, m.Diag)
 	changed := !h.known || h.signedIn != m.SignedIn || (m.SignedIn && m.Name != "" && m.Name != h.name)
 	h.known, h.signedIn = true, m.SignedIn
 	if m.SignedIn {
