@@ -57,9 +57,12 @@ func Build(dest string, o BuildOptions) ([]string, error) {
 			return nil, fmt.Errorf("%s can't go into a pack: %s", rel, r)
 		}
 		src := filepath.Join(luaDir, rel)
-		st, err := os.Stat(src)
+		st, err := os.Lstat(src)
 		if err != nil {
 			return nil, err
+		}
+		if st.Mode()&os.ModeSymlink != 0 {
+			return nil, fmt.Errorf("%s is a link; only real files can go into a pack", rel)
 		}
 		if st.IsDir() {
 			if dirHasSteamID(src) {

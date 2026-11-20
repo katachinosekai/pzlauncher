@@ -123,3 +123,19 @@ func TestDetectAndBuild(t *testing.T) {
 		}
 	}
 }
+
+func TestBuildRefusesLinks(t *testing.T) {
+	z := t.TempDir()
+	outside := filepath.Join(t.TempDir(), "secret.txt")
+	os.WriteFile(outside, []byte("private"), 0o644)
+	os.MkdirAll(filepath.Join(z, "Lua"), 0o755)
+	if err := os.Symlink(outside, filepath.Join(z, "Lua", "knox_settings.txt")); err != nil {
+		t.Skip(err)
+	}
+	for _, s := range DetectSettings(filepath.Join(z, "Lua"), nil) {
+		t.Fatalf("link offered: %+v", s)
+	}
+	if _, err := Build(filepath.Join(t.TempDir(), "p.zip"), BuildOptions{ZomboidDir: z, Lua: []string{"knox_settings.txt"}}); err == nil {
+		t.Fatal("link packed")
+	}
+}

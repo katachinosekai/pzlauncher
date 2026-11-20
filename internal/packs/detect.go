@@ -170,6 +170,9 @@ func DetectSettings(luaDir string, mods []ModRef) []Setting {
 	var out []Setting
 	for _, e := range ents {
 		name := e.Name()
+		if e.Type()&os.ModeSymlink != 0 {
+			continue
+		}
 		s := Setting{Rel: name, Dir: e.IsDir()}
 		if info, err := e.Info(); err == nil {
 			s.Size = info.Size()

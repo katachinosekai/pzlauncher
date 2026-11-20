@@ -169,9 +169,7 @@ func (u *ui) installTab() fyne.CanvasObject {
 			return
 		}
 		zp := zipPath
-		busy(true)
-		logAcc.Open(0)
-		go func() {
+		run := func() {
 			defer fyne.Do(func() { busy(false) })
 			fail := func(err error) {
 				fyne.Do(func() {
@@ -231,7 +229,21 @@ func (u *ui) installTab() fyne.CanvasObject {
 				status.SetText("Installed. " + summary)
 				showInstalled()
 			})
-		}()
+		}
+		start := func() {
+			busy(true)
+			logAcc.Open(0)
+			go run()
+		}
+		if fromGitHub && !dry {
+			dialog.ShowConfirm("Install a pack from GitHub?", "This pack comes from "+src.String()+".\n\nA pack replaces your controls and mod settings (yours are backed up first), can add world presets, can pre-approve Java mods in ZombieBuddy (you're asked first) and can switch ZBBatch on. Only install packs from people you trust.", func(ok bool) {
+				if ok {
+					start()
+				}
+			}, u.win)
+			return
+		}
+		start()
 	})
 	install.Importance = widget.HighImportance
 
