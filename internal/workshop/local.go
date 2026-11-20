@@ -54,3 +54,30 @@ func ReadLocalItem(itemDir string) LocalItem {
 	out.Title = strings.Join(names, ", ")
 	return out
 }
+
+func UploadPreviews(zomboidDir string) map[string]string {
+	out := map[string]string{}
+	for _, sub := range []string{"Workshop", "workshop-staging"} {
+		dirs, _ := filepath.Glob(filepath.Join(zomboidDir, sub, "*"))
+		for _, d := range dirs {
+			b, err := os.ReadFile(filepath.Join(d, "workshop.txt"))
+			if err != nil {
+				continue
+			}
+			id := ""
+			for _, line := range strings.Split(string(b), "\n") {
+				if v, ok := strings.CutPrefix(strings.TrimSpace(line), "id="); ok {
+					id = strings.TrimSpace(v)
+					break
+				}
+			}
+			p := filepath.Join(d, "preview.png")
+			if st, err := os.Stat(p); id != "" && err == nil && st.Mode().IsRegular() {
+				if _, seen := out[id]; !seen {
+					out[id] = p
+				}
+			}
+		}
+	}
+	return out
+}

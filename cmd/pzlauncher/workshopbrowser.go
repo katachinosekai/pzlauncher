@@ -6,6 +6,7 @@ import (
 	"image"
 	"image/color"
 	"os"
+	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
@@ -20,6 +21,7 @@ import (
 	"fyne.io/fyne/v2/widget"
 
 	"github.com/katachinosekai/pzlauncher/internal/install"
+	"github.com/katachinosekai/pzlauncher/internal/paths"
 	"github.com/katachinosekai/pzlauncher/internal/webview"
 	"github.com/katachinosekai/pzlauncher/internal/workshop"
 )
@@ -38,6 +40,7 @@ type wsDeps struct {
 	check    func(ctx context.Context, cid string) (*workshop.Result, error)
 	thumb    func(ctx context.Context, u string) ([]byte, error)
 	local    func(itemDir string) workshop.LocalItem
+	uploads  func() map[string]string
 	external func(u string) error
 }
 
@@ -50,6 +53,13 @@ var workshopDeps = wsDeps{
 	},
 	subs:  workshop.LocalSubscriptions,
 	local: workshop.ReadLocalItem,
+	uploads: func() map[string]string {
+		z, err := paths.Zomboid()
+		if err != nil {
+			return nil
+		}
+		return workshop.UploadPreviews(z)
+	},
 	check: func(ctx context.Context, cid string) (*workshop.Result, error) {
 		return workshop.Check(ctx, workshop.Options{CollectionID: cid})
 	},
@@ -101,23 +111,21 @@ func (u *ui) workshopTab() fyne.CanvasObject {
 	}
 	b.sess = newWSSession(b)
 	u.closers = append(u.closers, b.ctl.Close)
-	u.onTab("Workshop", b.sess.ensure)
 	hint := widget.NewLabel(wsHint)
 	hint.Wrapping = fyne.TextWrapWord
 	hint.Importance = widget.LowImportance
 	top := container.NewVBox(container.NewBorder(nil, nil, nil, container.NewHBox(b.sess.signInBtn, b.sess.signOutBtn), b.sess.label), b.status, hint)
 
 	tabs := container.NewAppTabs(
-		container.NewTabItem("Search", b.searchTab()),
-		container.NewTabItem("Popular / Recent", widget.NewLabel("")),
 		container.NewTabItem("My subscriptions", widget.NewLabel("")),
+		container.NewTabItem("Popular / Recent", widget.NewLabel("")),
 		container.NewTabItem("Pack collection", widget.NewLabel("")),
 	)
-	builders := []func() (fyne.CanvasObject, func()){nil, b.popularTab, b.subsTab, b.collectionTab}
+	builders := []func() (fyne.CanvasObject, func()){b.subsTab, b.popularTab, b.collectionTab}
 	loaded := make([]bool, len(builders))
-	tabs.OnSelected = func(it *container.TabItem) {
+	open := func(it *container.TabItem) {
 		i := tabs.SelectedIndex()
-		if i <= 0 || loaded[i] {
+		if i < 0 || i >= len(builders) || loaded[i] {
 			return
 		}
 		loaded[i] = true
@@ -128,7 +136,27 @@ func (u *ui) workshopTab() fyne.CanvasObject {
 			start()
 		}
 	}
-	return container.NewBorder(top, nil, nil, nil, tabs)
+	tabs.OnSelected = open
+	var results *container.TabItem
+	var setQuery func(string)
+	search := b.searchField(func(text string) {
+		if results == nil {
+			view, sq := b.searchResults()
+			results = container.NewTabItemWithIcon("Search", theme.SearchIcon(), view)
+			setQuery = sq
+			tabs.Append(results)
+		}
+		results.Text = "Search: " + text
+		tabs.Select(results)
+		tabs.Refresh()
+		setQuery(text)
+	})
+	ensure := b.sess.ensure
+	u.onTab("Workshop", func() {
+		ensure()
+		open(tabs.Selected())
+	})
+	return container.NewBorder(top, nil, nil, nil, container.NewStack(tabs, container.NewVBox(search)))
 }
 
 func (b *wsBrowser) openExternal(u string) {
@@ -453,25 +481,22 @@ func (b *wsBrowser) browseView(controls fyne.CanvasObject, query func() workshop
 	return container.NewBorder(top, container.NewCenter(more), nil, nil, list), func() { load(true) }
 }
 
-func (b *wsBrowser) searchTab() fyne.CanvasObject {
-	entry := widget.NewEntry()
-	entry.SetPlaceHolder("Search Project Zomboid mods...")
+func (b *wsBrowser) searchResults() (fyne.CanvasObject, func(string)) {
+	text := ""
 	sortSel := widget.NewSelect(workshop.SortNames, nil)
 	sortSel.SetSelected(workshop.SortNames[0])
-	var load func()
-	searchBtn := widget.NewButtonWithIcon("Search", theme.SearchIcon(), func() { load() })
-	controls := container.NewBorder(nil, nil, nil, container.NewHBox(sortSel, searchBtn), entry)
-	view, l := b.browseView(controls, func() workshop.BrowseQuery {
-		return workshop.BrowseQuery{Text: entry.Text, Sort: workshop.SortFromName(sortSel.Selected)}
+	view, load := b.browseView(sortSel, func() workshop.BrowseQuery {
+		return workshop.BrowseQuery{Text: text, Sort: workshop.SortFromName(sortSel.Selected)}
 	})
-	load = l
-	entry.OnSubmitted = func(string) { load() }
 	sortSel.OnChanged = func(string) {
-		if entry.Text != "" {
+		if text != "" {
 			load()
 		}
 	}
-	return view
+	return view, func(t string) {
+		text = t
+		load()
+	}
 }
 
 func (b *wsBrowser) popularTab() (fyne.CanvasObject, func()) {
@@ -491,6 +516,16 @@ func (b *wsBrowser) popularTab() (fyne.CanvasObject, func()) {
 	load = l
 	radio.OnChanged = func(string) { load() }
 	return view, load
+}
+
+func byPopular(items []wsItem, det map[string]workshop.Details) {
+	sort.SliceStable(items, func(i, j int) bool {
+		a, b := det[items[i].ID].Subscriptions, det[items[j].ID].Subscriptions
+		if a != b {
+			return a > b
+		}
+		return strings.ToLower(items[i].Title) < strings.ToLower(items[j].Title)
+	})
 }
 
 func subStateLabel(s workshop.SubState) string {
@@ -570,9 +605,17 @@ func (b *wsBrowser) subsTab() (fyne.CanvasObject, func()) {
 				det, derr = b.deps.details(b.u.ctx, ids)
 			}
 			local := map[string]workshop.LocalItem{}
+			var uploads map[string]string
+			if b.deps.uploads != nil {
+				uploads = b.deps.uploads()
+			}
 			for _, s := range subs {
 				if d := det[s.ID]; d.Title == "" || d.Preview == "" {
-					local[s.ID] = b.deps.local(s.Dir)
+					l := b.deps.local(s.Dir)
+					if l.Image == "" {
+						l.Image = uploads[s.ID]
+					}
+					local[s.ID] = l
 				}
 			}
 			fyne.Do(func() {
@@ -692,8 +735,36 @@ func (b *wsBrowser) collectionTab() (fyne.CanvasObject, func()) {
 			r, err := b.deps.check(b.u.ctx, c)
 			var det map[string]workshop.Details
 			var derr error
+			local := map[string]workshop.LocalItem{}
+			var uploads map[string]string
+			if b.deps.uploads != nil {
+				uploads = b.deps.uploads()
+			}
 			if err == nil {
 				det, derr = b.deps.details(b.u.ctx, r.IDs)
+				for _, id := range r.IDs {
+					if d := det[id]; (d.Title == "" || d.Preview == "") && r.ContentDir != "" {
+						local[id] = b.deps.local(filepath.Join(r.ContentDir, id))
+					}
+				}
+			}
+			title := func(id, fallback string) string {
+				if t := det[id].Title; t != "" {
+					return t
+				}
+				if t := local[id].Title; t != "" {
+					return t
+				}
+				return fallback
+			}
+			preview := func(id string) string {
+				if p := det[id].Preview; p != "" {
+					return p
+				}
+				if p := local[id].Image; p != "" {
+					return p
+				}
+				return uploads[id]
 			}
 			fyne.Do(func() {
 				refresh.Enable()
@@ -712,10 +783,6 @@ func (b *wsBrowser) collectionTab() (fyne.CanvasObject, func()) {
 				var installed []wsItem
 				for _, m := range r.Missing {
 					d := det[m.ID]
-					title := d.Title
-					if title == "" {
-						title = m.Title
-					}
 					label := "Missing"
 					subbed := false
 					switch m.State {
@@ -724,7 +791,7 @@ func (b *wsBrowser) collectionTab() (fyne.CanvasObject, func()) {
 					case workshop.NotSubscribed:
 						label = "Not subscribed"
 					}
-					it := wsItem{ID: m.ID, Title: title, Info: detailsInfo(d), State: label, Subscribed: subbed, Preview: d.Preview}
+					it := wsItem{ID: m.ID, Title: title(m.ID, m.Title), Info: detailsInfo(d), State: label, Subscribed: subbed, Preview: preview(m.ID)}
 					missing = append(missing, it)
 				}
 				for _, id := range r.IDs {
@@ -732,12 +799,10 @@ func (b *wsBrowser) collectionTab() (fyne.CanvasObject, func()) {
 						continue
 					}
 					d := det[id]
-					installed = append(installed, wsItem{ID: id, Title: d.Title, Info: detailsInfo(d), State: "Installed", Subscribed: true, Installed: true, Preview: d.Preview})
+					installed = append(installed, wsItem{ID: id, Title: title(id, ""), Info: detailsInfo(d), State: "Installed", Subscribed: true, Installed: true, Preview: preview(id)})
 				}
-				sort.SliceStable(installed, func(i, j int) bool {
-					return strings.ToLower(installed[i].Title) < strings.ToLower(installed[j].Title)
-				})
 				items = append(append(items, missing...), installed...)
+				byPopular(items, det)
 				list.Refresh()
 				msg := fmt.Sprintf("%d of %d collection items downloaded.", r.Installed, r.Total)
 				if len(r.Missing) == 0 {
