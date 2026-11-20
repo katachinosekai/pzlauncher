@@ -375,8 +375,14 @@ func TestAutoSort(t *testing.T) {
 	)
 	m := NewModel(x, []string{"e", "d", "c", "b", "a"}, nil)
 	m.AutoSort()
-	if !slices.Equal(m.Active, []string{"a", "c", "b", "d", "e"}) {
+	if !slices.Equal(m.Active, []string{"c", "b", "d", "a", "e"}) {
 		t.Fatalf("got %v", m.Active)
+	}
+	x = NewIndex(game, mod("a", "after", "c"), mod("b", "before", "c"), mod("c"))
+	m = NewModel(x, []string{"a", "b", "c"}, nil)
+	m.AutoSort()
+	if !slices.Equal(m.Active, []string{"b", "c", "a"}) || len(m.OrderIssues()) != 0 {
+		t.Fatalf("got %v %v", m.Active, m.OrderIssues())
 	}
 	x = NewIndex(game, mod("a", "before", "x,y"), mod("x"), mod("y"), mod("z", "after", "q"))
 	m = NewModel(x, []string{"z", "y", "x", "a"}, nil)

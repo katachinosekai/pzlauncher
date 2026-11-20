@@ -209,7 +209,7 @@ func (t *modsTab) build() {
 		t.model.AutoSort()
 		t.orderSel = -1
 		t.orderList.UnselectAll()
-		t.changed("Load order auto-sorted (the game's own Auto button rules).")
+		t.changed("Load order auto-sorted (the game's own Auto button rules, plus fixes for the orders it gets wrong).")
 	})
 	rmMissing := widget.NewButton("Remove missing", func() {
 		miss := t.model.RemoveMissing()

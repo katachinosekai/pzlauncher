@@ -323,7 +323,64 @@ func (m *Model) AutoSort() {
 			out = append(out, id)
 		}
 	}
-	m.Active = out
+	m.Active = m.repairOrder(out)
+}
+
+func (m *Model) repairOrder(order []string) []string {
+	pos := map[string]int{}
+	for i, id := range order {
+		pos[id] = i
+	}
+	preds := make([]map[int]bool, len(order))
+	edge := func(from string, to int) {
+		if i, ok := pos[from]; ok && i != to {
+			if preds[to] == nil {
+				preds[to] = map[int]bool{}
+			}
+			preds[to][i] = true
+		}
+	}
+	for i, id := range order {
+		mod := m.Index.Get(id)
+		if mod == nil {
+			continue
+		}
+		for _, a := range m.loadAfterAndRequire(mod) {
+			edge(a, i)
+		}
+		for _, b := range mod.Before() {
+			if j, ok := pos[b]; ok {
+				edge(id, j)
+			}
+		}
+	}
+	placed := make([]bool, len(order))
+	out := make([]string, 0, len(order))
+	for len(out) < len(order) {
+		next := -1
+		for i := range order {
+			if placed[i] {
+				continue
+			}
+			if next < 0 {
+				next = i
+			}
+			ready := true
+			for p := range preds[i] {
+				if !placed[p] {
+					ready = false
+					break
+				}
+			}
+			if ready {
+				next = i
+				break
+			}
+		}
+		placed[next] = true
+		out = append(out, order[next])
+	}
+	return out
 }
 
 type OrderIssue struct {
