@@ -592,6 +592,9 @@ func (in *Installer) ZBBatch(ctx context.Context) error {
 		in.say("  ZBBatch.jar: up to date")
 	}
 	props := filepath.Join(agentSrc, "zbbatch.properties")
+	if packProps := filepath.Join(in.opts.PackDir, "zbbatch", "zbbatch.properties"); isFile(packProps) {
+		props = packProps
+	}
 	if isFile(props) {
 		changed, err := in.copyIfChanged(props, in.zbHome, "zbbatch.properties", ".zombie_buddy")
 		if err != nil {

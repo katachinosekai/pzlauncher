@@ -166,7 +166,7 @@ func (in *Installer) Steps() []Step {
 		{"zombiebuddy", "ZombieBuddy setup", in.ZombieBuddy},
 		{"approvals", "ZombieBuddy approvals", in.Approvals},
 		{"memory", "Game memory", in.optional(in.opts.PackMemory, in.Memory)},
-		{"zbbatch", "ZBBatch", in.optional(in.opts.PackZBBatch, in.ZBBatch)},
+		{"zbbatch", "ZBBatch", in.optional(in.opts.PackZBBatch || isDir(filepath.Join(in.opts.PackDir, "zbbatch")), in.ZBBatch)},
 		{"modlist", "Mod list", in.ModList},
 	}
 }

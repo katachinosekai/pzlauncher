@@ -519,3 +519,23 @@ func TestPackLeavesMemoryAndZBBatchAlone(t *testing.T) {
 		t.Fatal("pack install copied ZBBatch.jar")
 	}
 }
+
+func TestPackZBBatchFolderEnablesZBBatchWithItsCache(t *testing.T) {
+	tr := newTree(t, "linux")
+	put(t, filepath.Join(tr.pack, "zbbatch", "zbbatch.properties"), "calibrated=true\nfingerprint=pack\n")
+	var log []string
+	o := tr.opts("linux", &log)
+	o.PackMemory, o.PackZBBatch = false, false
+	if _, err := Run(context.Background(), o); err != nil {
+		t.Fatalf("%v\n%s", err, strings.Join(log, "\n"))
+	}
+	if get(t, filepath.Join(tr.game, "ZBBatch.jar")) != "agent" {
+		t.Fatal("ZBBatch.jar not installed from the Workshop item")
+	}
+	if get(t, filepath.Join(tr.zbhome, "zbbatch.properties")) != "calibrated=true\nfingerprint=pack\n" {
+		t.Fatal("pack cache not used")
+	}
+	if args := vmArgs(t, get(t, filepath.Join(tr.game, "ProjectZomboid64.json"))); count(args, "-javaagent:ZBBatch.jar") != 1 {
+		t.Fatalf("ZBBatch not switched on: %v", args)
+	}
+}
