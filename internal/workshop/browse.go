@@ -54,9 +54,10 @@ func SortFromName(n string) Sort {
 }
 
 type BrowseQuery struct {
-	Text string
-	Sort Sort
-	Page int
+	Text        string
+	Sort        Sort
+	Page        int
+	Collections bool
 }
 
 func ItemURL(id string) string { return itemPageBase + url.QueryEscape(id) }
@@ -67,7 +68,11 @@ func BrowseURL(base string, q BrowseQuery) string {
 	}
 	v := url.Values{}
 	v.Set("appid", "108600")
-	v.Set("section", "readytouseitems")
+	if q.Collections {
+		v.Set("section", "collections")
+	} else {
+		v.Set("section", "readytouseitems")
+	}
 	switch q.Sort {
 	case SortRecent:
 		v.Set("browsesort", "mostrecent")

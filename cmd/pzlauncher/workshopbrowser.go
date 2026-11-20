@@ -76,6 +76,7 @@ type wsItem struct {
 	Subscribed bool
 	Installed  bool
 	Preview    string
+	Collection bool
 	sub        workshop.SubState
 }
 
@@ -87,12 +88,13 @@ func (it wsItem) displayTitle() string {
 }
 
 type wsBrowser struct {
-	u      *ui
-	deps   wsDeps
-	ctl    *webview.Controller
-	thumbs *thumbCache
-	status *widget.Label
-	sess   *wsSession
+	openCollection func(id, title string)
+	u              *ui
+	deps           wsDeps
+	ctl            *webview.Controller
+	thumbs         *thumbCache
+	status         *widget.Label
+	sess           *wsSession
 
 	busy     map[string]bool
 	subState map[string]bool
@@ -119,9 +121,23 @@ func (u *ui) workshopTab() fyne.CanvasObject {
 	tabs := container.NewAppTabs(
 		container.NewTabItem("My subscriptions", widget.NewLabel("")),
 		container.NewTabItem("Popular / Recent", widget.NewLabel("")),
+		container.NewTabItem("Collections", widget.NewLabel("")),
 		container.NewTabItem("Pack collection", widget.NewLabel("")),
 	)
-	builders := []func() (fyne.CanvasObject, func()){b.subsTab, b.popularTab, b.collectionTab}
+	builders := []func() (fyne.CanvasObject, func()){b.subsTab, b.popularTab, b.collectionsTab, b.collectionTab}
+	var viewing *container.TabItem
+	b.openCollection = func(id, title string) {
+		view, load := b.collectionView(id)
+		if viewing == nil {
+			viewing = container.NewTabItem("", view)
+			tabs.Append(viewing)
+		}
+		viewing.Text = "Collection: " + title
+		viewing.Content = view
+		tabs.Select(viewing)
+		tabs.Refresh()
+		load()
+	}
 	loaded := make([]bool, len(builders))
 	open := func(it *container.TabItem) {
 		i := tabs.SelectedIndex()
@@ -299,6 +315,9 @@ func (b *wsBrowser) showMenu(it wsItem, e *fyne.PointEvent) {
 	}
 	sub := fyne.NewMenuItem(label, func() { b.toggle(it) })
 	sub.Disabled = b.busy[it.ID]
+	if it.Collection {
+		sub = fyne.NewMenuItem("View items", func() { b.openCollection(it.ID, it.displayTitle()) })
+	}
 	link := workshop.ItemURL(it.ID)
 	menu := fyne.NewMenu("",
 		sub,
@@ -333,7 +352,17 @@ func (b *wsBrowser) itemList(items *[]wsItem) *widget.List {
 			sub := b.subscribed(it)
 			r.dot.FillColor = wsDotColor(busy, sub, it.Installed)
 			r.dot.Refresh()
+			if it.Collection {
+				r.dot.FillColor = color.Transparent
+				r.dot.Refresh()
+				r.btn.SetText("View items")
+				r.btn.Importance = widget.HighImportance
+				r.btn.Enable()
+				r.btn.Refresh()
+				r.btn.OnTapped = func() { b.openCollection(it.ID, it.displayTitle()) }
+			}
 			switch {
+			case it.Collection:
 			case busy:
 				r.btn.SetText("Working...")
 				r.btn.Importance = widget.MediumImportance
@@ -347,8 +376,10 @@ func (b *wsBrowser) itemList(items *[]wsItem) *widget.List {
 				r.btn.Importance = widget.HighImportance
 				r.btn.Enable()
 			}
-			r.btn.Refresh()
-			r.btn.OnTapped = func() { b.toggle(it) }
+			if !it.Collection {
+				r.btn.Refresh()
+				r.btn.OnTapped = func() { b.toggle(it) }
+			}
 			id := it.ID
 			r.ext.OnTapped = func() { b.openExternal(workshop.ItemURL(id)) }
 			r.card.onMenu = func(e *fyne.PointEvent) { b.showMenu(it, e) }
@@ -398,6 +429,9 @@ func humanSize(n int64) string {
 
 func detailsInfo(d workshop.Details) string {
 	var parts []string
+	if d.Collection && d.Children > 0 {
+		parts = append(parts, fmt.Sprintf("%d items", d.Children))
+	}
 	if d.Subscriptions > 0 {
 		parts = append(parts, humanCount(d.Subscriptions)+" subscribers")
 	}
@@ -461,10 +495,14 @@ func (b *wsBrowser) browseView(controls fyne.CanvasObject, query func() workshop
 					list.ScrollToTop()
 				}
 				for _, d := range r.Items {
-					items = append(items, wsItem{ID: d.ID, Title: d.Title, Info: detailsInfo(d), Preview: d.Preview})
+					items = append(items, wsItem{ID: d.ID, Title: d.Title, Info: detailsInfo(d), Preview: d.Preview, Collection: d.Collection || q.Collections})
 				}
 				list.Refresh()
-				status.SetText(fmt.Sprintf("%s: showing %d of %d items.", q.Sort, len(items), r.Total))
+				kind := "items"
+				if q.Collections {
+					kind = "collections"
+				}
+				status.SetText(fmt.Sprintf("%s: showing %d of %d %s.", q.Sort, len(items), r.Total, kind))
 				if r.TotalPages > page && len(r.Items) > 0 {
 					more.Show()
 				} else {
@@ -497,6 +535,32 @@ func (b *wsBrowser) searchResults() (fyne.CanvasObject, func(string)) {
 		text = t
 		load()
 	}
+}
+
+func (b *wsBrowser) collectionsTab() (fyne.CanvasObject, func()) {
+	opts := []string{"Popular this week", "Most popular", "Most recent"}
+	radio := widget.NewRadioGroup(opts, nil)
+	radio.Horizontal = true
+	radio.Required = true
+	radio.SetSelected(opts[0])
+	entry := widget.NewEntry()
+	entry.SetPlaceHolder("Search collections...")
+	var load func()
+	refresh := widget.NewButtonWithIcon("", theme.SearchIcon(), func() { load() })
+	view, l := b.browseView(container.NewBorder(nil, nil, radio, refresh, entry), func() workshop.BrowseQuery {
+		q := workshop.BrowseQuery{Text: entry.Text, Collections: true, Sort: workshop.SortTrendWeek}
+		switch radio.Selected {
+		case opts[1]:
+			q.Sort = workshop.SortPopular
+		case opts[2]:
+			q.Sort = workshop.SortRecent
+		}
+		return q
+	})
+	load = l
+	radio.OnChanged = func(string) { load() }
+	entry.OnSubmitted = func(string) { load() }
+	return view, load
 }
 
 func (b *wsBrowser) popularTab() (fyne.CanvasObject, func()) {
@@ -645,10 +709,15 @@ func (b *wsBrowser) subsTab() (fyne.CanvasObject, func()) {
 	return container.NewBorder(top, nil, nil, nil, list), load
 }
 
-func (b *wsBrowser) collectionTab() (fyne.CanvasObject, func()) {
+func (b *wsBrowser) collectionTab() (fyne.CanvasObject, func()) { return b.collectionView("") }
+
+func (b *wsBrowser) collectionView(fixed string) (fyne.CanvasObject, func()) {
 	prefs := b.u.app.Preferences()
 	colEntry := widget.NewEntry()
 	colEntry.SetText(prefs.StringWithFallback(prefCollection, workshop.DefaultCollectionID))
+	if fixed != "" {
+		colEntry.SetText(fixed)
+	}
 	cid := func() string {
 		c := strings.TrimSpace(colEntry.Text)
 		if c == "" {
@@ -728,7 +797,9 @@ func (b *wsBrowser) collectionTab() (fyne.CanvasObject, func()) {
 	var refresh *widget.Button
 	load := func() {
 		c := cid()
-		prefs.SetString(prefCollection, c)
+		if fixed == "" {
+			prefs.SetString(prefCollection, c)
+		}
 		refresh.Disable()
 		summary.SetText("Checking collection " + c + "...")
 		go func() {
@@ -838,8 +909,12 @@ func (b *wsBrowser) collectionTab() (fyne.CanvasObject, func()) {
 	refresh = widget.NewButtonWithIcon("Refresh", theme.ViewRefreshIcon(), load)
 	openCol := widget.NewButtonWithIcon("Open in browser", theme.ComputerIcon(), func() { b.openExternal(workshop.ItemURL(cid())) })
 	actions := container.NewHBox(subMissing, stop, openCol)
+	idRow := container.NewBorder(nil, nil, widget.NewLabel("Collection id"), refresh, colEntry)
+	if fixed != "" {
+		idRow = container.NewBorder(nil, nil, nil, refresh, summary)
+	}
 	top := container.NewVBox(
-		container.NewBorder(nil, nil, widget.NewLabel("Collection id"), refresh, colEntry),
+		idRow,
 		summary,
 		actions,
 		progress,

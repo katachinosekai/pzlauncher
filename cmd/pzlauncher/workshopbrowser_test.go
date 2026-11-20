@@ -98,7 +98,7 @@ func TestScreenshotsWorkshopReal(t *testing.T) {
 	if d, err := time.ParseDuration(os.Getenv("PZL_SHOTS_WAIT")); err == nil {
 		wait = d
 	}
-	shootWorkshop(t, dir, "-Real", wait, []int{2}, func(inner *container.AppTabs, capture func(string)) {
+	shootWorkshop(t, dir, "-Real", wait, []int{0}, func(inner *container.AppTabs, capture func(string)) {
 		subs, err := workshopDeps.subs()
 		if err != nil {
 			t.Fatal(err)
@@ -136,7 +136,7 @@ func TestScreenshotsWorkshopReal(t *testing.T) {
 				}
 			}
 		}
-		find(inner.Items[2].Content)
+		find(inner.Items[0].Content)
 		if list == nil {
 			t.Fatal("no list")
 		}
@@ -184,7 +184,7 @@ func shootWorkshop(t *testing.T, dir, suffix string, wait time.Duration, tabs []
 		png.Encode(f, w.Canvas().Capture())
 		f.Close()
 	}
-	names := []string{"Workshop-Search", "Workshop-PopularRecent", "Workshop-MySubscriptions", "Workshop-PackCollection"}
+	names := []string{"Workshop-MySubscriptions", "Workshop-PopularRecent", "Workshop-Collections", "Workshop-PackCollection"}
 	for _, i := range tabs {
 		inner.SelectIndex(i)
 		time.Sleep(wait)

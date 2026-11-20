@@ -24,6 +24,8 @@ type Details struct {
 	Votes         int64
 	Tags          []string
 	Found         bool
+	Children      int
+	Collection    bool
 }
 
 type flexInt int64
@@ -54,6 +56,8 @@ type rawDetails struct {
 	Subscriptions    flexInt `json:"subscriptions"`
 	StarRating       flexInt `json:"star_rating"`
 	TotalVotes       flexInt `json:"total_votes"`
+	NumChildren      flexInt `json:"num_children"`
+	FileType         flexInt `json:"file_type"`
 	Tags             []struct {
 		Tag string `json:"tag"`
 	} `json:"tags"`
@@ -69,6 +73,8 @@ func (r rawDetails) details() Details {
 		Subscriptions: int64(r.Subscriptions),
 		Stars:         int(r.StarRating),
 		Votes:         int64(r.TotalVotes),
+		Children:      int(r.NumChildren),
+		Collection:    r.FileType == 2,
 		Found:         r.Title != "" || r.Preview != "",
 	}
 	if d.Description == "" {
