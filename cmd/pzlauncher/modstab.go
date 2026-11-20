@@ -669,6 +669,7 @@ func (t *modsTab) showDetails() {
 		favText = "Remove from favorites"
 	}
 	buttons.Add(widget.NewButton(favText, func() { t.setFavorite(m.ID, !fav) }))
+	buttons.Add(t.u.modSettingsButton(m.ID, m.Name))
 	if u := m.WorkshopURL(); u != "" {
 		buttons.Add(widget.NewButton("Open Workshop page", func() {
 			if pu, err := url.Parse(u); err == nil {

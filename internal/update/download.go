@@ -247,13 +247,13 @@ func OpenLocalPack(zipPath string) (dir, version string, err error) {
 	root := PackRoot(dest)
 	if !isPack(root) {
 		os.RemoveAll(dest)
-		return "", "", fmt.Errorf("%s is not a PZ-Fixes pack (no settings or payload folder)", filepath.Base(zipPath))
+		return "", "", fmt.Errorf("%s is not a pack (no settings, presets, zbbatch or payload folder)", filepath.Base(zipPath))
 	}
 	return root, version, nil
 }
 
 func isPack(dir string) bool {
-	for _, d := range []string{"settings", "payload"} {
+	for _, d := range []string{"settings", "payload", "presets", "zbbatch"} {
 		if fi, err := os.Stat(filepath.Join(dir, d)); err == nil && fi.IsDir() {
 			return true
 		}

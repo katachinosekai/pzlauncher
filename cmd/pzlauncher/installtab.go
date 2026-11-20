@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,55 +12,65 @@ import (
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/storage"
+	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
+	"github.com/katachinosekai/pzlauncher/internal/packs"
+	"github.com/katachinosekai/pzlauncher/internal/paths"
+	"github.com/katachinosekai/pzlauncher/internal/play"
 	"github.com/katachinosekai/pzlauncher/internal/update"
 )
 
-const maxLogLines = 2000
+const (
+	maxLogLines  = 2000
+	prefPackRepo = "packs.lastSource"
+	srcLocal     = "Local file"
+	srcGitHub    = "GitHub (release file)"
+)
 
-type steps struct {
-	bar   *widget.ProgressBar
-	label *widget.Label
-	names []string
-}
-
-func (s *steps) set(i int, frac float64, note string) {
-	if frac < 0 {
-		frac = 0
+func packModRefs() []packs.ModRef {
+	idx, err := play.ScanInstalled()
+	if err != nil || idx == nil || idx.Index == nil {
+		return nil
 	}
-	if frac > 1 {
-		frac = 1
+	seen := map[string]bool{}
+	var out []packs.ModRef
+	for _, m := range idx.Index.AllCopies() {
+		if seen[m.ID] {
+			continue
+		}
+		seen[m.ID] = true
+		out = append(out, packs.ModRef{ID: m.ID, Name: m.Name, Requires: m.Requires()})
 	}
-	n := float64(len(s.names))
-	s.bar.SetValue((float64(i) + frac) / n)
-	text := fmt.Sprintf("Step %d/%d: %s", i+1, len(s.names), s.names[i])
-	if note != "" {
-		text += " - " + note
-	}
-	s.label.SetText(text)
+	return out
 }
 
 func (u *ui) installTab() fyne.CanvasObject {
 	installed := widget.NewLabel("")
+	installedWhen := newMuted("", false)
 	showInstalled := func() {
 		st, err := update.LoadState()
 		switch {
 		case err != nil:
-			installed.SetText("Installed pack: unknown (" + err.Error() + ")")
+			installed.SetText("Unknown (" + err.Error() + ")")
+			installedWhen.SetText("")
 		case st.PackVersion == "":
-			installed.SetText("Installed pack: none")
+			installed.SetText("No pack installed through the launcher yet.")
+			installedWhen.SetText("")
 		default:
-			installed.SetText("Installed pack: " + st.PackVersion)
+			installed.SetText(st.PackVersion)
+			installedWhen.SetText("Installed " + st.InstalledAt.Local().Format("2006-01-02 15:04"))
 		}
 	}
 	showInstalled()
+	installedCard := settingsSection("Installed pack", "", installed, tighten(installedWhen.rt))
 
 	var lines []string
 	logLabel := widget.NewLabel("")
 	logLabel.Wrapping = fyne.TextWrapWord
 	logLabel.TextStyle = fyne.TextStyle{Monospace: true}
 	logScroll := container.NewVScroll(logLabel)
+	logScroll.SetMinSize(fyne.NewSize(0, 220))
 	appendLog := func(s string) {
 		for _, l := range strings.Split(strings.TrimRight(s, "\n"), "\n") {
 			lines = append(lines, time.Now().Format("15:04:05 ")+l)
@@ -71,29 +82,24 @@ func (u *ui) installTab() fyne.CanvasObject {
 		logScroll.ScrollToBottom()
 	}
 	logf := func(s string) { fyne.Do(func() { appendLog(s) }) }
+	logAcc := widget.NewAccordion(widget.NewAccordionItem("Install log", logScroll))
 
-	pr := &steps{bar: widget.NewProgressBar(), label: widget.NewLabel("Idle"),
-		names: []string{"Open pack", "Install", "Save state"}}
+	status := widget.NewLabel("Choose a pack, then press Install. Quit the game first.")
+	status.Wrapping = fyne.TextWrapWord
+	bar := widget.NewProgressBarInfinite()
+	bar.Stop()
+	bar.Hide()
 
-	dryRun := widget.NewCheck("Dry run (show what would change)", nil)
-	zipLabel := widget.NewLabel("No pack chosen")
+	zipLabel := widget.NewLabel("No file chosen")
 	zipLabel.Truncation = fyne.TextTruncateEllipsis
 	var zipPath string
+	repoEntry := widget.NewEntry()
+	repoEntry.SetPlaceHolder("owner/repo, a GitHub release link, or an https link to a .zip")
+	repoEntry.SetText(u.app.Preferences().String(prefPackRepo))
+	repoNote := newMuted("Uses the .zip attached to the repo's latest release (or the release in the link). Public repos only.", false)
+
 	var pick, install *widget.Button
-
-	busy := func(b bool) {
-		if b {
-			pick.Disable()
-			install.Disable()
-			return
-		}
-		pick.Enable()
-		if zipPath != "" {
-			install.Enable()
-		}
-	}
-
-	pick = widget.NewButton("Choose PZ-Fixes.zip...", func() {
+	pick = widget.NewButtonWithIcon("Choose zip...", theme.FolderOpenIcon(), func() {
 		d := dialog.NewFileOpen(func(r fyne.URIReadCloser, err error) {
 			if err != nil || r == nil {
 				return
@@ -101,7 +107,6 @@ func (u *ui) installTab() fyne.CanvasObject {
 			r.Close()
 			zipPath = r.URI().Path()
 			zipLabel.SetText(zipPath)
-			busy(false)
 		}, u.win)
 		d.SetFilter(storage.NewExtensionFileFilter([]string{".zip"}))
 		if home, err := os.UserHomeDir(); err == nil {
@@ -114,67 +119,238 @@ func (u *ui) installTab() fyne.CanvasObject {
 		}
 		d.Show()
 	})
+	localRow := container.NewBorder(nil, nil, pick, nil, zipLabel)
+	githubRow := container.NewVBox(repoEntry, tighten(repoNote.rt))
+	githubRow.Hide()
+	srcSel := widget.NewRadioGroup([]string{srcLocal, srcGitHub}, func(s string) {
+		if s == srcGitHub {
+			localRow.Hide()
+			githubRow.Show()
+		} else {
+			githubRow.Hide()
+			localRow.Show()
+		}
+	})
+	srcSel.Horizontal = true
+	srcSel.Required = true
+	srcSel.SetSelected(srcLocal)
+	dryRun := widget.NewCheck("Dry run (only show what would change)", nil)
 
-	install = widget.NewButton("Install", func() {
-		if zipPath == "" {
+	busy := func(b bool) {
+		if b {
+			pick.Disable()
+			install.Disable()
+			srcSel.Disable()
+			bar.Show()
+			bar.Start()
+			return
+		}
+		pick.Enable()
+		install.Enable()
+		srcSel.Enable()
+		bar.Stop()
+		bar.Hide()
+	}
+
+	install = widget.NewButtonWithIcon("Install", theme.DownloadIcon(), func() {
+		dry := dryRun.Checked
+		fromGitHub := srcSel.Selected == srcGitHub
+		var src packs.Source
+		if fromGitHub {
+			s, err := packs.ParseSource(repoEntry.Text)
+			if err != nil {
+				dialog.ShowError(err, u.win)
+				return
+			}
+			src = s
+			u.app.Preferences().SetString(prefPackRepo, strings.TrimSpace(repoEntry.Text))
+		} else if zipPath == "" {
+			dialog.ShowInformation("Custom Packs", "Choose a pack zip first.", u.win)
 			return
 		}
 		zp := zipPath
-		dry := dryRun.Checked
 		busy(true)
+		logAcc.Open(0)
 		go func() {
 			defer fyne.Do(func() { busy(false) })
-			fail := func(step int, err error) {
+			fail := func(err error) {
 				fyne.Do(func() {
 					appendLog("error: " + err.Error())
-					pr.set(step, 0, "failed")
+					status.SetText("Failed: " + err.Error())
 				})
 			}
-			fyne.Do(func() { pr.set(0, 0, filepath.Base(zp)) })
-			logf("opening " + zp)
+			label := ""
+			if fromGitHub {
+				fyne.Do(func() { status.SetText("Downloading from " + src.String() + "...") })
+				cache, err := update.CacheDir()
+				if err != nil {
+					fail(err)
+					return
+				}
+				c := &packs.Client{}
+				p, err := c.Fetch(u.ctx, src, filepath.Join(cache, "pack-downloads"), func(done, total int64) {
+					if total > 0 {
+						fyne.Do(func() { status.SetText(fmt.Sprintf("Downloading from %s... %d%%", src.String(), done*100/total)) })
+					}
+				})
+				if err != nil {
+					fail(err)
+					return
+				}
+				zp, label = p, src.String()
+				logf("downloaded " + filepath.Base(p) + " from " + src.String())
+			}
+			fyne.Do(func() { status.SetText("Opening " + filepath.Base(zp) + "...") })
 			dir, v, err := update.OpenLocalPack(zp)
 			if err != nil {
-				fail(0, err)
+				fail(err)
 				return
 			}
-			logf("extracted to " + dir)
-			fyne.Do(func() { pr.set(1, 0, "") })
+			fyne.Do(func() { status.SetText("Installing...") })
 			summary, err := runInstall(u.ctx, dir, dry, logf)
 			if err != nil {
-				fail(1, err)
+				fail(err)
 				return
 			}
 			if summary != "" {
 				logf(summary)
 			}
 			if dry {
-				logf("dry run finished, nothing recorded")
-				fyne.Do(func() { pr.set(2, 1, "dry run") })
+				fyne.Do(func() { status.SetText("Dry run finished: nothing was changed. See the install log.") })
 				return
 			}
-			fyne.Do(func() { pr.set(2, 0, "") })
-			if err := update.MarkPackInstalled(v); err != nil {
-				fail(2, err)
+			name := filepath.Base(zp)
+			if label != "" {
+				name = label + ": " + name
+			}
+			if err := update.MarkPackInstalled(name + " (" + v + ")"); err != nil {
+				fail(err)
 				return
 			}
-			logf("installed pack " + v)
 			fyne.Do(func() {
-				pr.set(2, 1, "done")
+				status.SetText("Installed. " + summary)
 				showInstalled()
 			})
 		}()
 	})
 	install.Importance = widget.HighImportance
-	install.Disable()
 
-	top := container.NewVBox(
-		installed,
-		widget.NewLabel("Install or update a custom pack from the zip you were sent (for now: the PZ-Fixes pack). Quit the game first."),
-		container.NewBorder(nil, nil, pick, nil, zipLabel),
+	installCard := settingsSection("Install a pack", "Packs carry settings, presets and a ZBBatch cache; the mods themselves come from the Workshop.",
+		srcSel, localRow, githubRow,
 		container.NewHBox(install, dryRun),
-		pr.label,
-		pr.bar,
-		widget.NewLabelWithStyle("Log", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		status, bar, logAcc)
+
+	makeCard := settingsSection("Make a pack from my setup", "Share your settings: pick which mod settings, presets and the ZBBatch cache go in. Personal files (saved builds, outfits, logs, anything with a Steam ID) are never offered.",
+		container.NewHBox(widget.NewButtonWithIcon("Make a pack...", theme.ContentAddIcon(), u.makePackDialog)))
+
+	return container.NewVScroll(container.NewVBox(installedCard, installCard, makeCard))
+}
+
+func (u *ui) makePackDialog() {
+	z, err := paths.Zomboid()
+	if err != nil {
+		dialog.ShowError(err, u.win)
+		return
+	}
+	home, _ := os.UserHomeDir()
+	zbHome := filepath.Join(home, ".zombie_buddy")
+	settings := packs.DetectSettings(filepath.Join(z, "Lua"), packModRefs())
+	name := widget.NewEntry()
+	name.SetText("My-Pack")
+	var luaChecks []*widget.Check
+	var luaRels []string
+	luaBox := container.NewVBox()
+	for _, s := range settings {
+		if !s.Shareable() {
+			continue
+		}
+		owner := s.Owner
+		if owner == "" {
+			owner = "unknown mod"
+		}
+		rel := s.Rel
+		if s.Dir {
+			rel += "/"
+		}
+		c := widget.NewCheck(rel+"  ·  "+owner, nil)
+		c.SetChecked(s.Owner != "")
+		luaChecks = append(luaChecks, c)
+		luaRels = append(luaRels, s.Rel)
+		luaBox.Add(c)
+	}
+	modList := widget.NewCheck("Mod list (mods/default.txt)", nil)
+	modList.SetChecked(true)
+	var presetChecks []*widget.Check
+	var presetNames []string
+	presetBox := container.NewVBox()
+	if ents, err := os.ReadDir(filepath.Join(z, "Sandbox Presets")); err == nil {
+		for _, e := range ents {
+			if e.IsDir() || !strings.HasSuffix(strings.ToLower(e.Name()), ".cfg") {
+				continue
+			}
+			c := widget.NewCheck(e.Name(), nil)
+			presetChecks = append(presetChecks, c)
+			presetNames = append(presetNames, e.Name())
+			presetBox.Add(c)
+		}
+	}
+	if len(presetChecks) == 0 {
+		presetBox.Add(widget.NewLabel("No world presets found."))
+	}
+	zbb := widget.NewCheck("ZBBatch cache (zbbatch.properties)", nil)
+	if _, err := os.Stat(filepath.Join(zbHome, "zbbatch.properties")); err == nil {
+		zbb.SetChecked(true)
+	} else {
+		zbb.Disable()
+	}
+	head := func(s string) fyne.CanvasObject {
+		l := widget.NewLabel(s)
+		l.TextStyle = fyne.TextStyle{Bold: true}
+		return l
+	}
+	body := container.NewVBox(
+		container.NewBorder(nil, nil, widget.NewLabel("Pack name"), nil, name),
+		head("Mod settings (owner detected automatically)"), luaBox,
+		head("Game"), modList,
+		head("World presets"), presetBox,
+		head("ZBBatch"), zbb,
 	)
-	return container.NewBorder(top, nil, nil, nil, logScroll)
+	sc := container.NewVScroll(body)
+	sc.SetMinSize(fyne.NewSize(640, 460))
+	dialog.ShowCustomConfirm("Make a pack", "Save pack...", "Cancel", sc, func(ok bool) {
+		if !ok {
+			return
+		}
+		o := packs.BuildOptions{Name: name.Text, ZomboidDir: z, ZBHome: zbHome, ModList: modList.Checked, ZBBatch: zbb.Checked && !zbb.Disabled()}
+		for i, c := range luaChecks {
+			if c.Checked {
+				o.Lua = append(o.Lua, luaRels[i])
+			}
+		}
+		for i, c := range presetChecks {
+			if c.Checked {
+				o.Presets = append(o.Presets, presetNames[i])
+			}
+		}
+		d := dialog.NewFileSave(func(w fyne.URIWriteCloser, err error) {
+			if err != nil || w == nil {
+				return
+			}
+			dest := w.URI().Path()
+			w.Close()
+			files, err := packs.Build(dest, o)
+			if err != nil {
+				os.Remove(dest)
+				dialog.ShowError(err, u.win)
+				return
+			}
+			if len(files) == 0 {
+				dialog.ShowError(errors.New("the pack is empty"), u.win)
+				return
+			}
+			dialog.ShowInformation("Pack saved", fmt.Sprintf("Saved %d files to\n%s\n\nFriends install it with Mods > Custom Packs > Local file, or attach it to a GitHub release and use GitHub.", len(files), dest), u.win)
+		}, u.win)
+		d.SetFileName(strings.ReplaceAll(strings.TrimSpace(name.Text), " ", "-") + ".zip")
+		d.Show()
+	}, u.win)
 }

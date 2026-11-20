@@ -44,7 +44,8 @@ func (u *ui) javaModsTab() fyne.CanvasObject {
 			status.Truncation = fyne.TextTruncateEllipsis
 			approve := widget.NewButton("Approve this jar", nil)
 			deny := widget.NewButton("Deny", nil)
-			return container.New(layout.NewCustomPaddedVBoxLayout(-theme.Padding()*2), title, detail, container.NewBorder(nil, nil, nil, container.NewHBox(approve, deny), status))
+			settings := widget.NewButtonWithIcon("Mod settings", theme.SettingsIcon(), nil)
+			return container.New(layout.NewCustomPaddedVBoxLayout(-theme.Padding()*2), title, detail, container.NewBorder(nil, nil, nil, container.NewHBox(settings, approve, deny), status))
 		},
 		func(i widget.ListItemID, o fyne.CanvasObject) {
 			if i >= len(mods) {
@@ -57,8 +58,11 @@ func (u *ui) javaModsTab() fyne.CanvasObject {
 			row := box.Objects[2].(*fyne.Container)
 			status := row.Objects[0].(*widget.Label)
 			btns := row.Objects[1].(*fyne.Container)
-			approve := btns.Objects[0].(*widget.Button)
-			deny := btns.Objects[1].(*widget.Button)
+			settings := btns.Objects[0].(*widget.Button)
+			approve := btns.Objects[1].(*widget.Button)
+			deny := btns.Objects[2].(*widget.Button)
+			modID, modName := m.ID, m.Name
+			settings.OnTapped = func() { u.modSettingsDialog(modID, modName) }
 
 			ws := m.WorkshopID
 			if ws == "" {
