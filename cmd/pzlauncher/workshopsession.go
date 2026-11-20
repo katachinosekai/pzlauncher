@@ -71,7 +71,6 @@ func (s *wsSession) ensure() {
 	s.started = true
 	s.ephemeral = false
 	s.b.ctl.Args = s.args()
-	s.label.SetText("Steam sign-in: checking...")
 	s.send(webview.Command{Op: webview.OpState})
 }
 
