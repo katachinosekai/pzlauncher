@@ -17,9 +17,9 @@ import (
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
-	"github.com/kata/pzlauncher/internal/modlist"
-	"github.com/kata/pzlauncher/internal/paths"
-	"github.com/kata/pzlauncher/internal/play"
+	"github.com/katachinosekai/pzlauncher/internal/modlist"
+	"github.com/katachinosekai/pzlauncher/internal/paths"
+	"github.com/katachinosekai/pzlauncher/internal/play"
 )
 
 const (

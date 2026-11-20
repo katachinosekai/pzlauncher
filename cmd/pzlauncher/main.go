@@ -12,7 +12,7 @@ import (
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/widget"
 
-	"github.com/kata/pzlauncher/internal/update"
+	"github.com/katachinosekai/pzlauncher/internal/update"
 )
 
 var version = "dev"

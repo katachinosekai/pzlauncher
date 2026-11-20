@@ -1,6 +1,6 @@
 package gamecfg
 
-import "github.com/kata/pzlauncher/internal/install"
+import "github.com/katachinosekai/pzlauncher/internal/install"
 
 var gameNames = []string{"ProjectZomboid64", "ProjectZomboid32"}
 

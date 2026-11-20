@@ -10,7 +10,7 @@ import (
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/widget"
 
-	"github.com/kata/pzlauncher/internal/diag"
+	"github.com/katachinosekai/pzlauncher/internal/diag"
 )
 
 func beforeGameLaunch() {

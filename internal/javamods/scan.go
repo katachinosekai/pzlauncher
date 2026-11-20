@@ -10,7 +10,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/kata/pzlauncher/internal/modlist"
+	"github.com/katachinosekai/pzlauncher/internal/modlist"
 )
 
 type ModInfo struct {

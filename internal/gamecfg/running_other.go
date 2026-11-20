@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/kata/pzlauncher/internal/install"
+	"github.com/katachinosekai/pzlauncher/internal/install"
 )
 
 var gameNames = []string{"ProjectZomboid64", "ProjectZomboid32", "ProjectZomboid6"}

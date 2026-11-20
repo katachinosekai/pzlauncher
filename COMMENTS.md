@@ -13,7 +13,7 @@
 
 ## update
 
-- `update.Repo` default `OWNER/pzlauncher`; set with `-ldflags "-X github.com/kata/pzlauncher/internal/update.Repo=owner/repo"`. `Latest()` refuses the placeholder.
+- `update.Repo` default `OWNER/pzlauncher`; set with `-ldflags "-X github.com/katachinosekai/pzlauncher/internal/update.Repo=owner/repo"`. `Latest()` refuses the placeholder.
 - `Latest()` reads `/repos/<repo>/releases/latest` (no token, 60 req/h limit) and then `manifest.json` from the release assets. Pack asset = first `PZ-Fixes.zip` / `PZ-Fixes-*.zip`.
 - `Download` streams to a temp file next to the destination while hashing; a missing/invalid hash in the manifest is an error, mismatch returns `ErrChecksum` and deletes the temp file.
 - `FetchPack` -> cache `os.UserCacheDir()/PZLauncher/packs/pack-<version>`; zip deleted after extraction. Returns `PackRoot(dir)`: if the zip has exactly one top-level folder, that folder is returned instead of the extraction root. The installer gets this path as `PackDir`.
@@ -29,6 +29,10 @@
 - All UI updates from goroutines go through `fyne.Do`.
 - Install steps for the progress bar: check, download (percent), verify+extract, install, save state.
 - Local Linux build on this Fedora box: `go build -tags wayland ./cmd/pzlauncher` works (wayland/xkbcommon/EGL headers present). The default X11 build needs `libXcursor-devel libXrandr-devel libXinerama-devel libXi-devel libXxf86vm-devel mesa-libGL-devel`.
+
+## pack from a local zip (2026-11-19)
+
+The Fixes pack is NOT published (local git only), so the Install tab no longer checks GitHub for a pack: "Choose PZ-Fixes.zip..." -> `update.OpenLocalPack(zip)` extracts to `<cache>/PZLauncher/packs/pack-local-<sha8>` (must contain `settings/` or `payload/`), version `local-<sha8>` goes to state.json. CLI: `-install <zip or folder>`. Backups and logs go to `<config>/PZLauncher/install-backups` and `install-logs` (not the extracted pack, which is wiped on re-extract); `diag.InstallerLogDirs` includes install-logs. GitHub releases are used only for launcher self-update (`update.Repo` = katachinosekai/pzlauncher; release assets PZLauncher-windows-amd64.exe, PZLauncher-linux-x86_64.AppImage, manifest.json with launcher_version + sha256). install.ps1 retired in the Fixes repo (trash/installer-deprecated-20261119); the Go port's `-Xmx` target follows the ps1's last state (-Xmx6g).
 
 ## install
 

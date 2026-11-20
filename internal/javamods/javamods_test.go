@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kata/pzlauncher/internal/modlist"
+	"github.com/katachinosekai/pzlauncher/internal/modlist"
 )
 
 func write(t *testing.T, p, s string) {

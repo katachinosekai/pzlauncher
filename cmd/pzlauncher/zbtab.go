@@ -13,11 +13,11 @@ import (
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/widget"
 
-	"github.com/kata/pzlauncher/internal/install"
-	"github.com/kata/pzlauncher/internal/paths"
-	"github.com/kata/pzlauncher/internal/play"
-	"github.com/kata/pzlauncher/internal/update"
-	"github.com/kata/pzlauncher/internal/zbsetup"
+	"github.com/katachinosekai/pzlauncher/internal/install"
+	"github.com/katachinosekai/pzlauncher/internal/paths"
+	"github.com/katachinosekai/pzlauncher/internal/play"
+	"github.com/katachinosekai/pzlauncher/internal/update"
+	"github.com/katachinosekai/pzlauncher/internal/zbsetup"
 )
 
 const prefZBUse = "zombiebuddy.use"

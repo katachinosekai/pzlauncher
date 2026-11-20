@@ -55,7 +55,7 @@ func TestSetXmx(t *testing.T) {
 		{"b: real file WITHOUT the -Xmx element", `{"mainClass" : "zombie/gameStates/MainScreenState", "classpath" : [ ".", "projectzomboid.jar" ], "vmArgs" : [ "-Djava.awt.headless=true", "-Dzomboid.steam=1", "-XX:-OmitStackTraceInFastThrow" ]}`, "", true, false},
 		{"c: empty vmArgs array", `{"vmArgs" : [ ]}`, "", true, false},
 		{"d: vmArgs, no spaces", `{"vmArgs":["-Dx=1"]}`, "", true, false},
-		{"e: already 8192", `{"vmArgs":["-Xmx8192m"]}`, "-Xmx8192m", false, false},
+		{"e: already 6g", `{"vmArgs":["-Xmx6g"]}`, "-Xmx6g", false, false},
 		{"f: gigabytes", `{"vmArgs":["-Xmx4g"]}`, "-Xmx4g", true, false},
 		{"g: multi-line linux file", linuxJSON, "-Xmx3072m", true, false},
 		{"h: no vmArgs", `{"mainClass":"x"}`, "", false, true},
@@ -97,13 +97,13 @@ func TestAddJVMFlags(t *testing.T) {
 	if out2, again := AddJVMFlags(out); len(again) != 0 || out2 != out {
 		t.Fatalf("not idempotent: %v", again)
 	}
-	partial := `{"vmArgs":["-Xmx8192m","-XX:+UseStringDeduplication"]}`
+	partial := `{"vmArgs":["-Xmx6g","-XX:+UseStringDeduplication"]}`
 	out, added = AddJVMFlags(partial)
 	if count(vmArgs(t, out), "-XX:+UseStringDeduplication") != 1 || len(added) != len(JVMFlags)-1 {
 		t.Fatalf("partial: %v %s", added, out)
 	}
 	if _, added = AddJVMFlags(`{"vmArgs":["-Xmx3072m"]}`); len(added) != 0 {
-		t.Fatal("flags added without -Xmx8192m")
+		t.Fatal("flags added without -Xmx6g")
 	}
 }
 

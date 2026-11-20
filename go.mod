@@ -1,4 +1,4 @@
-module github.com/kata/pzlauncher
+module github.com/katachinosekai/pzlauncher
 
 go 1.26.0
 

@@ -225,3 +225,51 @@ func extractFile(f *zip.File, p string) error {
 	}
 	return err
 }
+
+func OpenLocalPack(zipPath string) (dir, version string, err error) {
+	sum, err := fileSHA256(zipPath)
+	if err != nil {
+		return "", "", err
+	}
+	version = "local-" + sum[:8]
+	cache, err := CacheDir()
+	if err != nil {
+		return "", "", err
+	}
+	dest := filepath.Join(cache, "packs", safeName("pack-"+version))
+	if err := os.RemoveAll(dest); err != nil {
+		return "", "", err
+	}
+	if err := Extract(zipPath, dest); err != nil {
+		os.RemoveAll(dest)
+		return "", "", err
+	}
+	root := PackRoot(dest)
+	if !isPack(root) {
+		os.RemoveAll(dest)
+		return "", "", fmt.Errorf("%s is not a PZ-Fixes pack (no settings or payload folder)", filepath.Base(zipPath))
+	}
+	return root, version, nil
+}
+
+func isPack(dir string) bool {
+	for _, d := range []string{"settings", "payload"} {
+		if fi, err := os.Stat(filepath.Join(dir, d)); err == nil && fi.IsDir() {
+			return true
+		}
+	}
+	return false
+}
+
+func fileSHA256(p string) (string, error) {
+	f, err := os.Open(p)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
+}

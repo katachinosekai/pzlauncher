@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/kata/pzlauncher/internal/paths"
+	"github.com/katachinosekai/pzlauncher/internal/paths"
 )
 
 var ErrGameRunning = errors.New("Project Zomboid is running; quit the game before saving settings")

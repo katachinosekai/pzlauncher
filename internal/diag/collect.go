@@ -13,10 +13,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kata/pzlauncher/internal/javamods"
-	"github.com/kata/pzlauncher/internal/modlist"
-	"github.com/kata/pzlauncher/internal/paths"
-	"github.com/kata/pzlauncher/internal/play"
+	"github.com/katachinosekai/pzlauncher/internal/javamods"
+	"github.com/katachinosekai/pzlauncher/internal/modlist"
+	"github.com/katachinosekai/pzlauncher/internal/paths"
+	"github.com/katachinosekai/pzlauncher/internal/play"
 )
 
 const maxFileBytes = 32 << 20
@@ -63,6 +63,9 @@ func DefaultCollectOptions(launcherVersion string) CollectOptions {
 
 func InstallerLogDirs() []string {
 	var out []string
+	if c, err := os.UserConfigDir(); err == nil {
+		out = append(out, filepath.Join(c, "PZLauncher", "install-logs"))
+	}
 	if c, err := os.UserCacheDir(); err == nil {
 		base := filepath.Join(c, "PZLauncher", "packs")
 		for _, pat := range []string{filepath.Join(base, "*", "logs"), filepath.Join(base, "*", "*", "logs")} {

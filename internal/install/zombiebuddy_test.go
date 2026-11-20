@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kata/pzlauncher/internal/zbsetup"
+	"github.com/katachinosekai/pzlauncher/internal/zbsetup"
 )
 
 func zbJar(t *testing.T, p, version string) {

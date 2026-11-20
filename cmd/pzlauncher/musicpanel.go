@@ -12,8 +12,8 @@ import (
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/widget"
 
-	"github.com/kata/pzlauncher/internal/music"
-	"github.com/kata/pzlauncher/internal/play"
+	"github.com/katachinosekai/pzlauncher/internal/music"
+	"github.com/katachinosekai/pzlauncher/internal/play"
 )
 
 var launcherMusic = music.NewPlayer()

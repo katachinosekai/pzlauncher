@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kata/pzlauncher/internal/install"
+	"github.com/katachinosekai/pzlauncher/internal/install"
 
-	"github.com/kata/pzlauncher/internal/modlist"
+	"github.com/katachinosekai/pzlauncher/internal/modlist"
 )
 
 type Status int

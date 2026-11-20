@@ -8,8 +8,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/kata/pzlauncher/internal/install"
-	"github.com/kata/pzlauncher/internal/paths"
+	"github.com/katachinosekai/pzlauncher/internal/install"
+	"github.com/katachinosekai/pzlauncher/internal/paths"
 )
 
 const (

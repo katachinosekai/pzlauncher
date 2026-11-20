@@ -6,8 +6,11 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
+	"strings"
 
-	"github.com/kata/pzlauncher/internal/install"
+	"github.com/katachinosekai/pzlauncher/internal/install"
+	"github.com/katachinosekai/pzlauncher/internal/update"
 )
 
 type cliFlags struct {
@@ -22,7 +25,7 @@ type cliFlags struct {
 
 func registerCLI() cliFlags {
 	return cliFlags{
-		installPack: flag.String("install", "", "install from an extracted pack folder without opening the window"),
+		installPack: flag.String("install", "", "install from PZ-Fixes.zip (or an extracted pack folder) without opening the window"),
 		steamRoot:   flag.String("steam-root", "", "Steam folder to install into (default: detected)"),
 		zomboidDir:  flag.String("zomboid-dir", "", "Zomboid user folder (default: detected)"),
 		zbHome:      flag.String("zombiebuddy-home", "", "ZombieBuddy settings folder (default: ~/.zombie_buddy)"),
@@ -48,8 +51,20 @@ func runCLI(f cliFlags) int {
 			fmt.Fprintln(w, s)
 		}
 	}
+	pack := *f.installPack
+	if strings.EqualFold(filepath.Ext(pack), ".zip") {
+		dir, v, err := update.OpenLocalPack(pack)
+		if err != nil {
+			log("error: " + err.Error())
+			return 1
+		}
+		log("pack " + v + " extracted to " + dir)
+		pack = dir
+	}
 	r, err := install.Run(context.Background(), install.Options{
-		PackDir:         *f.installPack,
+		PackDir:         pack,
+		BackupRoot:      installDataDir("install-backups"),
+		LogDir:          installDataDir("install-logs"),
 		SteamRoot:       *f.steamRoot,
 		ZomboidDir:      *f.zomboidDir,
 		ZombieBuddyHome: *f.zbHome,

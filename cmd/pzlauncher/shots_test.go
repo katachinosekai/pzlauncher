@@ -15,7 +15,7 @@ import (
 	"fyne.io/fyne/v2/test"
 	"fyne.io/fyne/v2/theme"
 
-	"github.com/kata/pzlauncher/internal/update"
+	"github.com/katachinosekai/pzlauncher/internal/update"
 )
 
 func TestScreenshots(t *testing.T) {

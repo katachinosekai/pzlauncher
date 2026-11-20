@@ -12,7 +12,7 @@ import (
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
-	"github.com/kata/pzlauncher/internal/webview"
+	"github.com/katachinosekai/pzlauncher/internal/webview"
 )
 
 const (

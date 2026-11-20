@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kata/pzlauncher/internal/paths"
+	"github.com/katachinosekai/pzlauncher/internal/paths"
 	_ "modernc.org/sqlite"
 )
 

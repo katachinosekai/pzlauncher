@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-const XmxTarget = "-Xmx8192m"
+const XmxTarget = "-Xmx6g"
 
 var JVMFlags = []string{
 	"-XX:+UseCompactObjectHeaders",
@@ -24,7 +24,7 @@ var (
 	reXmx         = regexp.MustCompile(`-Xmx[0-9]+[kKmMgG]?`)
 	reVMArgs      = regexp.MustCompile(`(?i)"vmArgs"\s*:\s*\[`)
 	reVMArgsNext  = regexp.MustCompile(`(?i)"vmArgs"\s*:\s*\[\s*[,"]`)
-	reXmxQuoted   = regexp.MustCompile(`(?i)"-Xmx8192m"`)
+	reXmxQuoted   = regexp.MustCompile(`(?i)"-Xmx6g"`)
 	reAgentAny    = regexp.MustCompile(`(?i)-javaagent:ZBBatch\.jar`)
 	reAgentComma  = regexp.MustCompile(`(?i),\s*"-javaagent:ZBBatch\.jar"`)
 	reAgentAfter  = regexp.MustCompile(`(?i)"-javaagent:ZBBatch\.jar"\s*,?\s*`)

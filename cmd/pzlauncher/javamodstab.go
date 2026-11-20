@@ -10,8 +10,8 @@ import (
 	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/widget"
 
-	"github.com/kata/pzlauncher/internal/javamods"
-	"github.com/kata/pzlauncher/internal/play"
+	"github.com/katachinosekai/pzlauncher/internal/javamods"
+	"github.com/katachinosekai/pzlauncher/internal/play"
 )
 
 func (u *ui) javaModsTab() fyne.CanvasObject {

@@ -19,8 +19,8 @@ import (
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
-	"github.com/kata/pzlauncher/internal/update"
-	"github.com/kata/pzlauncher/internal/workshop"
+	"github.com/katachinosekai/pzlauncher/internal/update"
+	"github.com/katachinosekai/pzlauncher/internal/workshop"
 )
 
 func fakeWorkshopDeps() wsDeps {

@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/kata/pzlauncher/internal/modlist"
+	"github.com/katachinosekai/pzlauncher/internal/modlist"
 )
 
 type scriptValue struct{ key, value string }

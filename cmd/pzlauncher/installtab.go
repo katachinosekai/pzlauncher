@@ -2,14 +2,18 @@ package main
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/dialog"
+	"fyne.io/fyne/v2/storage"
 	"fyne.io/fyne/v2/widget"
 
-	"github.com/kata/pzlauncher/internal/update"
+	"github.com/katachinosekai/pzlauncher/internal/update"
 )
 
 const maxLogLines = 2000
@@ -38,9 +42,6 @@ func (s *steps) set(i int, frac float64, note string) {
 
 func (u *ui) installTab() fyne.CanvasObject {
 	installed := widget.NewLabel("")
-	latest := widget.NewLabel("Latest pack: not checked")
-	var rel *update.Release
-
 	showInstalled := func() {
 		st, err := update.LoadState()
 		switch {
@@ -72,71 +73,53 @@ func (u *ui) installTab() fyne.CanvasObject {
 	logf := func(s string) { fyne.Do(func() { appendLog(s) }) }
 
 	pr := &steps{bar: widget.NewProgressBar(), label: widget.NewLabel("Idle"),
-		names: []string{"Check latest release", "Download pack", "Verify and extract", "Install", "Save state"}}
+		names: []string{"Open pack", "Install", "Save state"}}
 
 	dryRun := widget.NewCheck("Dry run (show what would change)", nil)
-	var check, install *widget.Button
+	zipLabel := widget.NewLabel("No pack chosen")
+	zipLabel.Truncation = fyne.TextTruncateEllipsis
+	var zipPath string
+	var pick, install *widget.Button
 
 	busy := func(b bool) {
 		if b {
-			check.Disable()
+			pick.Disable()
 			install.Disable()
 			return
 		}
-		check.Enable()
-		if rel != nil && rel.Pack != nil {
+		pick.Enable()
+		if zipPath != "" {
 			install.Enable()
 		}
 	}
 
-	setLatest := func(r *update.Release) {
-		rel = r
-		if r == nil {
-			latest.SetText("Latest pack: unavailable")
-			install.SetText("Install")
-			return
-		}
-		v := r.Manifest.PackVersion
-		if v == "" {
-			v = r.Tag
-		}
-		latest.SetText("Latest pack: " + v + " (release " + r.Tag + ")")
-		st, _ := update.LoadState()
-		switch {
-		case st.PackVersion == "":
-			install.SetText("Install")
-		case update.Newer(v, st.PackVersion):
-			install.SetText("Update to " + v)
-		default:
-			install.SetText("Reinstall")
-		}
-	}
-
-	check = widget.NewButton("Check", func() {
-		busy(true)
-		pr.set(0, 0, "")
-		go func() {
-			r, err := u.client.Latest(u.ctx)
-			fyne.Do(func() {
-				if err != nil {
-					appendLog("check failed: " + err.Error())
-					pr.label.SetText("Check failed")
-					setLatest(nil)
-				} else {
-					appendLog("latest release " + r.Tag)
-					pr.set(0, 1, "done")
-					setLatest(r)
+	pick = widget.NewButton("Choose PZ-Fixes.zip...", func() {
+		d := dialog.NewFileOpen(func(r fyne.URIReadCloser, err error) {
+			if err != nil || r == nil {
+				return
+			}
+			r.Close()
+			zipPath = r.URI().Path()
+			zipLabel.SetText(zipPath)
+			busy(false)
+		}, u.win)
+		d.SetFilter(storage.NewExtensionFileFilter([]string{".zip"}))
+		if home, err := os.UserHomeDir(); err == nil {
+			for _, sub := range []string{"Downloads", "Desktop"} {
+				if l, err := storage.ListerForURI(storage.NewFileURI(filepath.Join(home, sub))); err == nil {
+					d.SetLocation(l)
+					break
 				}
-				busy(false)
-			})
-		}()
+			}
+		}
+		d.Show()
 	})
 
 	install = widget.NewButton("Install", func() {
-		if rel == nil {
+		if zipPath == "" {
 			return
 		}
-		r := rel
+		zp := zipPath
 		dry := dryRun.Checked
 		busy(true)
 		go func() {
@@ -147,35 +130,18 @@ func (u *ui) installTab() fyne.CanvasObject {
 					pr.set(step, 0, "failed")
 				})
 			}
-			fyne.Do(func() { pr.set(1, 0, r.Pack.Name) })
-			logf("downloading " + r.Pack.Name)
-			var lastPct int64 = -1
-			dir, err := u.client.FetchPack(u.ctx, r, func(done, total int64) {
-				if total <= 0 {
-					return
-				}
-				pct := done * 100 / total
-				if pct == lastPct {
-					return
-				}
-				lastPct = pct
-				fyne.Do(func() {
-					if pct >= 100 {
-						pr.set(2, 0.5, "")
-					} else {
-						pr.set(1, float64(pct)/100, fmt.Sprintf("%d%%", pct))
-					}
-				})
-			})
+			fyne.Do(func() { pr.set(0, 0, filepath.Base(zp)) })
+			logf("opening " + zp)
+			dir, v, err := update.OpenLocalPack(zp)
 			if err != nil {
-				fail(1, err)
+				fail(0, err)
 				return
 			}
-			logf("checksum ok, extracted to " + dir)
-			fyne.Do(func() { pr.set(3, 0, "") })
+			logf("extracted to " + dir)
+			fyne.Do(func() { pr.set(1, 0, "") })
 			summary, err := runInstall(u.ctx, dir, dry, logf)
 			if err != nil {
-				fail(3, err)
+				fail(1, err)
 				return
 			}
 			if summary != "" {
@@ -183,23 +149,18 @@ func (u *ui) installTab() fyne.CanvasObject {
 			}
 			if dry {
 				logf("dry run finished, nothing recorded")
-				fyne.Do(func() { pr.set(4, 1, "dry run") })
+				fyne.Do(func() { pr.set(2, 1, "dry run") })
 				return
 			}
-			fyne.Do(func() { pr.set(4, 0, "") })
-			v := r.Manifest.PackVersion
-			if v == "" {
-				v = r.Tag
-			}
+			fyne.Do(func() { pr.set(2, 0, "") })
 			if err := update.MarkPackInstalled(v); err != nil {
-				fail(4, err)
+				fail(2, err)
 				return
 			}
 			logf("installed pack " + v)
 			fyne.Do(func() {
-				pr.set(4, 1, "done")
+				pr.set(2, 1, "done")
 				showInstalled()
-				setLatest(r)
 			})
 		}()
 	})
@@ -208,8 +169,9 @@ func (u *ui) installTab() fyne.CanvasObject {
 
 	top := container.NewVBox(
 		installed,
-		latest,
-		container.NewHBox(check, install, dryRun),
+		widget.NewLabel("Install or update the fix pack from the PZ-Fixes.zip you were sent. Quit the game first."),
+		container.NewBorder(nil, nil, pick, nil, zipLabel),
+		container.NewHBox(install, dryRun),
 		pr.label,
 		pr.bar,
 		widget.NewLabelWithStyle("Log", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),

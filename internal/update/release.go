@@ -15,7 +15,7 @@ import (
 	"time"
 )
 
-var Repo = "OWNER/pzlauncher"
+var Repo = "katachinosekai/pzlauncher"
 
 const (
 	ManifestName     = "manifest.json"

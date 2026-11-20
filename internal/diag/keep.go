@@ -7,7 +7,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/kata/pzlauncher/internal/paths"
+	"github.com/katachinosekai/pzlauncher/internal/paths"
 )
 
 const KeepCount = 10

@@ -11,7 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/kata/pzlauncher/internal/update"
+	"github.com/katachinosekai/pzlauncher/internal/update"
 )
 
 const (

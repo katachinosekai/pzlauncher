@@ -5,7 +5,7 @@ import (
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
 
-	"github.com/kata/pzlauncher/internal/install"
+	"github.com/katachinosekai/pzlauncher/internal/install"
 )
 
 const prefCollection = "workshop.collection"

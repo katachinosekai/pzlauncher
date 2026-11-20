@@ -16,7 +16,7 @@ import (
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
-	"github.com/kata/pzlauncher/internal/gamecfg"
+	"github.com/katachinosekai/pzlauncher/internal/gamecfg"
 )
 
 var flagHelp = map[string]string{
@@ -119,7 +119,7 @@ func (u *ui) settingsTab() fyne.CanvasObject {
 	if ramMB > 0 {
 		ramText = fmt.Sprintf("System RAM: %.1f GB", float64(ramMB)/1024)
 	}
-	ramLabel := newMuted(ramText+fmt.Sprintf(" · choose %d-%d GB · 8 GB (the pack's 8192m) is recommended for big modpacks", lo, hi), false)
+	ramLabel := newMuted(ramText+fmt.Sprintf(" · choose %d-%d GB · 6 GB (the pack's 6g) is recommended for big modpacks", lo, hi), false)
 	curLabel := widget.NewLabel("")
 	curLabel.TextStyle = fyne.TextStyle{Bold: true}
 	curLabel.Wrapping = fyne.TextWrapWord

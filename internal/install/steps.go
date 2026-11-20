@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kata/pzlauncher/internal/paths"
+	"github.com/katachinosekai/pzlauncher/internal/paths"
 )
 
 func (in *Installer) Preflight(ctx context.Context) error {
@@ -507,7 +507,7 @@ func (in *Installer) Memory(ctx context.Context) error {
 	case r.NoArray:
 		in.warn("no vmArgs array in ProjectZomboid64.json; game memory not changed")
 	case !r.Changed:
-		in.say("  already 8192 MB")
+		in.say("  already 6 GB")
 	default:
 		old := r.Old
 		if old == "" {

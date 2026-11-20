@@ -18,7 +18,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/kata/pzlauncher/internal/modlist"
+	"github.com/katachinosekai/pzlauncher/internal/modlist"
 )
 
 const thumbSide = 128

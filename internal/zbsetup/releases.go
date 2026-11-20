@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kata/pzlauncher/internal/update"
+	"github.com/katachinosekai/pzlauncher/internal/update"
 )
 
 const (

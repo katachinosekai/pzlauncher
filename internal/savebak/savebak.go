@@ -13,8 +13,8 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/kata/pzlauncher/internal/paths"
-	"github.com/kata/pzlauncher/internal/play"
+	"github.com/katachinosekai/pzlauncher/internal/paths"
+	"github.com/katachinosekai/pzlauncher/internal/play"
 )
 
 const stampLayout = "20060102-150405"

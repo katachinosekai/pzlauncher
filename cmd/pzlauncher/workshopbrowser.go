@@ -19,9 +19,9 @@ import (
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
-	"github.com/kata/pzlauncher/internal/install"
-	"github.com/kata/pzlauncher/internal/webview"
-	"github.com/kata/pzlauncher/internal/workshop"
+	"github.com/katachinosekai/pzlauncher/internal/install"
+	"github.com/katachinosekai/pzlauncher/internal/webview"
+	"github.com/katachinosekai/pzlauncher/internal/workshop"
 )
 
 func init() {

@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"path/filepath"
 
-	"github.com/kata/pzlauncher/internal/modlist"
-	"github.com/kata/pzlauncher/internal/zbsetup"
+	"github.com/katachinosekai/pzlauncher/internal/modlist"
+	"github.com/katachinosekai/pzlauncher/internal/zbsetup"
 )
 
 type zbState struct {
