@@ -66,8 +66,6 @@ var workshopDeps = wsDeps{
 	external: func(u string) error { return install.DefaultSystem().OpenURL(u) },
 }
 
-const wsHint = "Subscribe and Unsubscribe run in the background on Steam's own Workshop page in a hidden built-in browser. Sign in once with Steam's QR code or login page; the launcher never sees your password. Steam downloads new subscriptions in the Steam client, and downloads may stall while the game is running."
-
 type wsItem struct {
 	ID         string
 	Title      string
@@ -114,10 +112,7 @@ func (u *ui) workshopTab() fyne.CanvasObject {
 	}
 	b.sess = newWSSession(b)
 	u.closers = append(u.closers, b.ctl.Close)
-	hint := widget.NewLabel(wsHint)
-	hint.Wrapping = fyne.TextWrapWord
-	hint.Importance = widget.LowImportance
-	top := container.NewVBox(container.NewBorder(nil, nil, nil, container.NewHBox(b.sess.signInBtn, b.sess.signOutBtn), b.sess.label), b.status, hint)
+	top := container.NewVBox(container.NewBorder(nil, nil, nil, container.NewHBox(b.sess.signInBtn, b.sess.signOutBtn), b.sess.label), b.status)
 
 	tabs := container.NewAppTabs(
 		container.NewTabItem("My subscriptions", widget.NewLabel("")),

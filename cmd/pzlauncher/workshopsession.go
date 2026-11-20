@@ -49,7 +49,7 @@ type wsSession struct {
 
 func newWSSession(b *wsBrowser) *wsSession {
 	s := &wsSession{b: b, reqs: map[int]wsPending{}}
-	s.label = widget.NewLabel("Steam sign-in: not checked yet.")
+	s.label = widget.NewLabel("")
 	s.label.Truncation = fyne.TextTruncateEllipsis
 	s.signInBtn = widget.NewButtonWithIcon("Sign in to Steam", theme.LoginIcon(), func() { s.askSignIn() })
 	s.signOutBtn = widget.NewButtonWithIcon("Sign out", theme.LogoutIcon(), func() { s.signOut() })
@@ -86,17 +86,8 @@ func (s *wsSession) refresh() {
 	switch {
 	case s.fallback:
 		s.label.SetText("Built-in browser unavailable: Subscribe opens Steam pages in your default browser.")
-	case !s.known:
-		s.label.SetText("Steam sign-in: checking...")
-	case s.signedIn:
-		who := "Signed in to Steam"
-		if s.name != "" {
-			who += " as " + s.name
-		}
-		s.label.SetText(who)
 	default:
-		msg := "Not signed in to Steam (only needed to Subscribe/Unsubscribe here)."
-		s.label.SetText(msg)
+		s.label.SetText("")
 	}
 	if s.signedIn && !s.fallback {
 		s.signInBtn.Hide()
