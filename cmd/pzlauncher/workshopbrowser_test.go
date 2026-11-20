@@ -150,7 +150,7 @@ func shootWorkshop(t *testing.T, dir, suffix string, wait time.Duration, tabs []
 	os.MkdirAll(dir, 0o755)
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	a := test.NewTempApp(t)
-	a.Settings().SetTheme(theme.DarkTheme())
+	a.Settings().SetTheme(appTheme{theme.DarkTheme()})
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	w := test.NewWindow(nil)

@@ -360,7 +360,6 @@ func (t *modsTab) createRow() fyne.CanvasObject {
 	name.Truncation = fyne.TextTruncateEllipsis
 	info := widget.NewLabel("")
 	info.Importance = widget.LowImportance
-	info.SizeName = theme.SizeNameCaptionText
 	info.Truncation = fyne.TextTruncateEllipsis
 	text := container.New(layout.NewCustomPaddedVBoxLayout(-12), name, info)
 	return container.NewBorder(nil, nil, container.NewHBox(check, icon), nil, text)

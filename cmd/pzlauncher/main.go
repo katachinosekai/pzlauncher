@@ -55,6 +55,7 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	a.Settings().SetTheme(newAppTheme())
 	w := a.NewWindow("PZ Launcher")
 	u := &ui{app: a, win: w, ctx: ctx, client: update.NewClient()}
 

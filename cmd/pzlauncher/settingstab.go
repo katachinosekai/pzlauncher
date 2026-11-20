@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
@@ -34,11 +35,8 @@ type mutedText struct {
 	seg *widget.TextSegment
 }
 
-func newMuted(s string, small bool) *mutedText {
+func newMuted(s string, _ bool) *mutedText {
 	seg := &widget.TextSegment{Text: s, Style: widget.RichTextStyle{ColorName: theme.ColorNamePlaceHolder}}
-	if small {
-		seg.Style.SizeName = theme.SizeNameCaptionText
-	}
 	rt := widget.NewRichText(seg)
 	rt.Wrapping = fyne.TextWrapWord
 	return &mutedText{rt: rt, seg: seg}
@@ -69,7 +67,7 @@ func tighten(o fyne.CanvasObject) fyne.CanvasObject {
 }
 
 func subLine(o fyne.CanvasObject) fyne.CanvasObject {
-	return container.New(layout.NewCustomPaddedLayout(-theme.Padding()*3, 0, theme.IconInlineSize()+theme.InnerPadding(), 0), o)
+	return container.New(layout.NewCustomPaddedLayout(-theme.Padding()*2, 0, theme.IconInlineSize()+theme.InnerPadding()*2, 0), o)
 }
 
 func shortPath(p string) string {
@@ -115,16 +113,37 @@ func (u *ui) settingsTab() fyne.CanvasObject {
 
 	ramMB := gamecfg.TotalRAMMB()
 	lo, hi := gamecfg.XmxRangeGB(ramMB)
-	ramText := "System RAM: unknown"
-	if ramMB > 0 {
-		ramText = fmt.Sprintf("System RAM: %.1f GB", float64(ramMB)/1024)
+	freeLabel := widget.NewLabel("Free RAM right now: measuring...")
+	var samples []int
+	sample := func() {
+		mb := gamecfg.FreeRAMMB()
+		if mb <= 0 {
+			freeLabel.SetText("Free RAM right now: unknown")
+			return
+		}
+		samples = append(samples, mb)
+		if len(samples) > 12 {
+			samples = samples[len(samples)-12:]
+		}
+		sum := 0
+		for _, v := range samples {
+			sum += v
+		}
+		gb := int(float64(sum)/float64(len(samples))/1024 + 0.5)
+		freeLabel.SetText(fmt.Sprintf("Free RAM right now: about %d GB (average of the last minute)", gb))
 	}
-	ramLabel := newMuted(ramText+fmt.Sprintf(" · choose %d-%d GB · 6 GB (the pack's 6g) is recommended for big modpacks", lo, hi), false)
+	sample()
+	ramTicker := time.NewTicker(5 * time.Second)
+	go func() {
+		for range ramTicker.C {
+			fyne.Do(sample)
+		}
+	}()
+	u.closers = append(u.closers, ramTicker.Stop)
 	curLabel := widget.NewLabel("")
-	curLabel.TextStyle = fyne.TextStyle{Bold: true}
 	curLabel.Wrapping = fyne.TextWrapWord
 	curDetail := newMuted("", true)
-	jsonName := widget.NewLabel("Game file: ProjectZomboid64.json")
+	jsonName := widget.NewLabel("Where your ProjectZomboid64.json file lives")
 	jsonPath := newMuted("", true)
 	openJSON := widget.NewButtonWithIcon("Open folder", theme.FolderOpenIcon(), func() { u.openFolder(filepath.Dir(env.JSONPath())) })
 	jsonRow := container.NewBorder(nil, nil, nil, container.NewCenter(openJSON), container.NewVBox(jsonName, tighten(jsonPath.rt)))
@@ -150,7 +169,7 @@ func (u *ui) settingsTab() fyne.CanvasObject {
 		}
 		c := widget.NewCheck(text, nil)
 		flagChecks[f] = c
-		flagBox.Add(container.NewVBox(c, subLine(raw.rt)))
+		flagBox.Add(container.New(layout.NewCustomPaddedLayout(2, 8, 0, 0), container.NewVBox(c, subLine(raw.rt))))
 	}
 	argsLabel := widget.NewLabel("")
 	argsLabel.TextStyle = fyne.TextStyle{Monospace: true}
@@ -181,7 +200,7 @@ func (u *ui) settingsTab() fyne.CanvasObject {
 		cur := "Java default"
 		if i.Xmx != "" {
 			cur = memText(i.XmxMB)
-			curDetail.SetText("Set in the game file as " + i.Xmx)
+			curDetail.SetText("Set in ProjectZomboid64.json as " + i.Xmx)
 		}
 		curLabel.SetText("Memory: " + cur + "  ·  Garbage collector: " + i.GC)
 		sel := ""
@@ -262,8 +281,8 @@ func (u *ui) settingsTab() fyne.CanvasObject {
 	memCard := settingsSection("Memory", "",
 		curLabel, tighten(curDetail.rt),
 		container.NewBorder(nil, nil, widget.NewLabel("Memory limit"), nil, xmxSel),
-		ramLabel.rt, jsonRow)
-	javaCard := settingsSection("Java options", "Memory-saving options from the pack. Other entries in the game file are never changed.",
+		freeLabel, jsonRow)
+	javaCard := settingsSection("Java options", "Memory-saving options from the pack. Other entries in ProjectZomboid64.json are never changed.",
 		flagBox, widget.NewAccordion(widget.NewAccordionItem("All Java options (read-only)", argsLabel)),
 		container.NewHBox(saveJVM, reapply), updNote.rt)
 
@@ -294,7 +313,7 @@ func (u *ui) settingsTab() fyne.CanvasObject {
 	form := widget.NewForm(modeRow, resRow, fpsRow, fontRow)
 	optPath := newMuted("", true)
 	optErr := newMuted("", false)
-	optName := widget.NewLabel("Game file: options.ini")
+	optName := widget.NewLabel("Where your options.ini file lives")
 	openOpts := widget.NewButtonWithIcon("Open folder", theme.FolderOpenIcon(), func() { u.openFolder(filepath.Dir(env.OptionsPath())) })
 	optRow := container.NewBorder(nil, nil, nil, container.NewCenter(openOpts), container.NewVBox(optName, tighten(optPath.rt)))
 

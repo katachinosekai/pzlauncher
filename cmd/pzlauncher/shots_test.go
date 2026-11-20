@@ -27,7 +27,7 @@ func TestScreenshots(t *testing.T) {
 		t.Fatal(err)
 	}
 	a := test.NewTempApp(t)
-	a.Settings().SetTheme(theme.DarkTheme())
+	a.Settings().SetTheme(appTheme{theme.DarkTheme()})
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	w := test.NewWindow(nil)

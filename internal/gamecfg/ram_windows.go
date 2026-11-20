@@ -29,3 +29,13 @@ func TotalRAMMB() int {
 	}
 	return int(m.TotalPhys / (1024 * 1024))
 }
+
+func FreeRAMMB() int {
+	var m memoryStatusEx
+	m.Length = uint32(unsafe.Sizeof(m))
+	r, _, _ := procGlobalMemoryStatusEx.Call(uintptr(unsafe.Pointer(&m)))
+	if r == 0 {
+		return 0
+	}
+	return int(m.AvailPhys / (1024 * 1024))
+}

@@ -271,7 +271,6 @@ func newWSRow() *wsRow {
 	r.info.Truncation = fyne.TextTruncateEllipsis
 	r.info.Alignment = fyne.TextAlignTrailing
 	r.info.Importance = widget.LowImportance
-	r.info.SizeName = theme.SizeNameCaptionText
 	dotBox := container.New(layout.NewCustomPaddedLayout(0, 0, 6, 8), container.NewCenter(container.NewGridWrap(fyne.NewSize(12, 12), r.dot)))
 	text := container.NewGridWithColumns(2,
 		container.NewVBox(layout.NewSpacer(), r.title, layout.NewSpacer()),
