@@ -20,6 +20,8 @@ REPO="katachinosekai/pzlauncher"
 ID="io.github.katachinosekai.pzlauncher"
 OUT="$ROOT/release/v$V"
 [ -z "$(git status --porcelain --untracked-files=no)" ] || { echo "commit your changes first" >&2; exit 1; }
+scripts/thirdparty.sh >/dev/null
+[ -z "$(git status --porcelain --untracked-files=no)" ] || { echo "THIRD_PARTY_LICENSES.txt was out of date: commit the regenerated file" >&2; exit 1; }
 rm -rf "$OUT"
 mkdir -p "$OUT"
 for os in windows linux; do
@@ -28,6 +30,7 @@ for os in windows linux; do
 	fyne-cross "$os" -arch amd64 -app-id "$ID" -app-version "$V" -icon cmd/pzlauncher/Icon.png -name "$name" ./cmd/pzlauncher
 done
 cp fyne-cross/bin/windows-amd64/PZLauncher.exe "$OUT/PZLauncher-windows-amd64.exe"
+cp cmd/pzlauncher/THIRD_PARTY_LICENSES.txt "$OUT/THIRD_PARTY_LICENSES.txt"
 APPDIR="$(mktemp -d)/PZLauncher.AppDir"
 mkdir -p "$APPDIR/usr/bin"
 cp fyne-cross/bin/linux-amd64/pzlauncher "$APPDIR/usr/bin/pzlauncher"

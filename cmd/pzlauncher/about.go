@@ -1,6 +1,7 @@
 package main
 
 import (
+	_ "embed"
 	"net/url"
 
 	"fyne.io/fyne/v2"
@@ -8,6 +9,9 @@ import (
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/widget"
 )
+
+//go:embed THIRD_PARTY_LICENSES.txt
+var thirdPartyLicenses string
 
 const disclaimer = "Unofficial fan tool, not affiliated with The Indie Stone"
 
@@ -29,6 +33,7 @@ The mods installed through the pack come from the Steam Workshop and belong to t
 - **Fyne** (fyne.io): BSD 3-Clause License
 - **modernc.org/sqlite**: BSD 3-Clause License
 - **golang.org/x/sys**: BSD 3-Clause License
+- Other Go modules under MIT, BSD, ISC, Apache 2.0 and public-domain licences (full texts: **Third-party licences**)
 
 ## Launcher
 
@@ -47,8 +52,17 @@ func (u *ui) showAbout() {
 			links.Add(widget.NewHyperlink(l.name, parsed))
 		}
 	}
+	links.Add(widget.NewButton("Third-party licences", u.showThirdPartyLicenses))
 	body := container.NewBorder(nil, links, nil, nil, container.NewVScroll(text))
 	d := dialog.NewCustom("About & credits", "Close", body, u.win)
 	d.Resize(fyne.NewSize(560, 480))
+	d.Show()
+}
+
+func (u *ui) showThirdPartyLicenses() {
+	text := widget.NewLabel(thirdPartyLicenses)
+	text.TextStyle = fyne.TextStyle{Monospace: true}
+	d := dialog.NewCustom("Third-party licences", "Close", container.NewScroll(text), u.win)
+	d.Resize(fyne.NewSize(760, 560))
 	d.Show()
 }
