@@ -89,6 +89,7 @@ func (it wsItem) displayTitle() string {
 
 type wsBrowser struct {
 	openCollection func(id, title string)
+	searchShown    func()
 	u              *ui
 	deps           wsDeps
 	ctl            *webview.Controller
@@ -120,11 +121,13 @@ func (u *ui) workshopTab() fyne.CanvasObject {
 
 	tabs := container.NewAppTabs(
 		container.NewTabItem("My subscriptions", widget.NewLabel("")),
-		container.NewTabItem("Popular / Recent", widget.NewLabel("")),
-		container.NewTabItem("Collections", widget.NewLabel("")),
-		container.NewTabItem("Pack collection", widget.NewLabel("")),
+		container.NewTabItem("Search for Collection", widget.NewLabel("")),
+		container.NewTabItemWithIcon("", theme.SearchIcon(), widget.NewLabel("")),
+		container.NewTabItem("Popular / Recent Mods", widget.NewLabel("")),
+		container.NewTabItem("My Subscribed Collection", widget.NewLabel("")),
 	)
-	builders := []func() (fyne.CanvasObject, func()){b.subsTab, b.popularTab, b.collectionsTab, b.collectionTab}
+	const searchIdx = 2
+	builders := []func() (fyne.CanvasObject, func()){b.subsTab, b.collectionsTab, b.searchTab, b.popularTab, b.collectionTab}
 	var viewing *container.TabItem
 	b.openCollection = func(id, title string) {
 		view, load := b.collectionView(id)
@@ -141,6 +144,9 @@ func (u *ui) workshopTab() fyne.CanvasObject {
 	loaded := make([]bool, len(builders))
 	open := func(it *container.TabItem) {
 		i := tabs.SelectedIndex()
+		if i == searchIdx && loaded[i] && b.searchShown != nil {
+			b.searchShown()
+		}
 		if i < 0 || i >= len(builders) || loaded[i] {
 			return
 		}
@@ -153,26 +159,12 @@ func (u *ui) workshopTab() fyne.CanvasObject {
 		}
 	}
 	tabs.OnSelected = open
-	var results *container.TabItem
-	var setQuery func(string)
-	search := b.searchField(func(text string) {
-		if results == nil {
-			view, sq := b.searchResults()
-			results = container.NewTabItemWithIcon("Search", theme.SearchIcon(), view)
-			setQuery = sq
-			tabs.Append(results)
-		}
-		results.Text = "Search: " + text
-		tabs.Select(results)
-		tabs.Refresh()
-		setQuery(text)
-	})
 	ensure := b.sess.ensure
 	u.onTab("Workshop", func() {
 		ensure()
 		open(tabs.Selected())
 	})
-	return container.NewBorder(top, nil, nil, nil, container.NewStack(tabs, container.NewVBox(search)))
+	return container.NewBorder(top, nil, nil, nil, tabs)
 }
 
 func (b *wsBrowser) openExternal(u string) {
@@ -517,24 +509,6 @@ func (b *wsBrowser) browseView(controls fyne.CanvasObject, query func() workshop
 	})
 	top := container.NewVBox(container.NewBorder(nil, nil, nil, openBrowse, controls), status)
 	return container.NewBorder(top, container.NewCenter(more), nil, nil, list), func() { load(true) }
-}
-
-func (b *wsBrowser) searchResults() (fyne.CanvasObject, func(string)) {
-	text := ""
-	sortSel := widget.NewSelect(workshop.SortNames, nil)
-	sortSel.SetSelected(workshop.SortNames[0])
-	view, load := b.browseView(sortSel, func() workshop.BrowseQuery {
-		return workshop.BrowseQuery{Text: text, Sort: workshop.SortFromName(sortSel.Selected)}
-	})
-	sortSel.OnChanged = func(string) {
-		if text != "" {
-			load()
-		}
-	}
-	return view, func(t string) {
-		text = t
-		load()
-	}
 }
 
 func (b *wsBrowser) collectionsTab() (fyne.CanvasObject, func()) {

@@ -5,28 +5,26 @@ import (
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
-	"fyne.io/fyne/v2/layout"
-	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
+
+	"github.com/katachinosekai/pzlauncher/internal/workshop"
 )
 
-const searchOpenW = 320
+type growLayout struct{ f float32 }
 
-type widthLayout struct{ w float32 }
-
-func (l *widthLayout) MinSize(objs []fyne.CanvasObject) fyne.Size {
+func (l *growLayout) MinSize(objs []fyne.CanvasObject) fyne.Size {
 	h := float32(0)
 	for _, o := range objs {
 		h = max(h, o.MinSize().Height)
 	}
-	return fyne.NewSize(l.w, h)
+	return fyne.NewSize(0, h)
 }
 
-func (l *widthLayout) Layout(objs []fyne.CanvasObject, size fyne.Size) {
+func (l *growLayout) Layout(objs []fyne.CanvasObject, size fyne.Size) {
 	for _, o := range objs {
-		o.Resize(fyne.NewSize(l.w, size.Height))
+		o.Resize(fyne.NewSize(size.Width*l.f, size.Height))
 		o.Move(fyne.NewPos(0, 0))
-		if l.w < 2 {
+		if l.f < 0.02 {
 			o.Hide()
 		} else {
 			o.Show()
@@ -34,80 +32,44 @@ func (l *widthLayout) Layout(objs []fyne.CanvasObject, size fyne.Size) {
 	}
 }
 
-type searchEntry struct {
-	widget.Entry
-	onBlur func()
-}
-
-func newSearchEntry() *searchEntry {
-	e := &searchEntry{}
-	e.ExtendBaseWidget(e)
-	return e
-}
-
-func (e *searchEntry) FocusLost() {
-	e.Entry.FocusLost()
-	if e.onBlur != nil {
-		e.onBlur()
-	}
-}
-
-func (e *searchEntry) TypedKey(k *fyne.KeyEvent) {
-	if k.Name == fyne.KeyEscape {
-		e.SetText("")
-		if c := fyne.CurrentApp().Driver().CanvasForObject(e); c != nil {
-			c.Unfocus()
-		}
-		return
-	}
-	e.Entry.TypedKey(k)
-}
-
-func (b *wsBrowser) searchField(onSearch func(string)) fyne.CanvasObject {
-	entry := newSearchEntry()
+func (b *wsBrowser) searchTab() (fyne.CanvasObject, func()) {
+	text := ""
+	entry := widget.NewEntry()
 	entry.SetPlaceHolder("Search Workshop mods...")
-	wl := &widthLayout{}
-	box := container.New(wl, entry)
+	gl := &growLayout{}
+	box := container.New(gl, entry)
+	sortSel := widget.NewSelect(workshop.SortNames, nil)
+	sortSel.SetSelected(workshop.SortNames[0])
+	view, load := b.browseView(container.NewBorder(nil, nil, nil, sortSel, box), func() workshop.BrowseQuery {
+		return workshop.BrowseQuery{Text: text, Sort: workshop.SortFromName(sortSel.Selected)}
+	})
+	search := func() {
+		text = entry.Text
+		if text != "" {
+			load()
+		}
+	}
+	entry.OnSubmitted = func(string) { search() }
+	sortSel.OnChanged = func(string) { search() }
 	var anim *fyne.Animation
-	open := false
-	animate := func(to float32) {
+	b.searchShown = func() {
 		if anim != nil {
 			anim.Stop()
 		}
-		from := wl.w
-		anim = fyne.NewAnimation(220*time.Millisecond, func(f float32) {
-			wl.w = from + (to-from)*f
+		if gl.f < 1 {
+			gl.f = 0
 			box.Refresh()
-		})
-		anim.Curve = fyne.AnimationEaseOut
-		anim.Start()
+			anim = fyne.NewAnimation(260*time.Millisecond, func(f float32) {
+				gl.f = f
+				box.Refresh()
+			})
+			anim.Curve = fyne.AnimationEaseOut
+			anim.Start()
+		}
+		go func() {
+			time.Sleep(280 * time.Millisecond)
+			fyne.Do(func() { b.u.win.Canvas().Focus(entry) })
+		}()
 	}
-	var btn *widget.Button
-	btn = widget.NewButtonWithIcon("", theme.SearchIcon(), func() {
-		if open && entry.Text != "" {
-			onSearch(entry.Text)
-			return
-		}
-		if !open {
-			open = true
-			animate(searchOpenW)
-			go func() {
-				time.Sleep(240 * time.Millisecond)
-				fyne.Do(func() { b.u.win.Canvas().Focus(entry) })
-			}()
-		}
-	})
-	btn.Importance = widget.LowImportance
-	entry.OnSubmitted = func(s string) {
-		if s != "" {
-			onSearch(s)
-		}
-	}
-	entry.onBlur = func() {
-		if open && entry.Text == "" {
-			open = false
-			animate(0)
-		}
-	}
-	return container.NewHBox(layout.NewSpacer(), box, btn)
+	return view, b.searchShown
 }

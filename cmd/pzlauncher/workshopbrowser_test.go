@@ -86,7 +86,7 @@ func TestScreenshotsWorkshop(t *testing.T) {
 	saved := workshopDeps
 	workshopDeps = fakeWorkshopDeps()
 	defer func() { workshopDeps = saved }()
-	shootWorkshop(t, dir, "", 1500*time.Millisecond, []int{0, 1, 2, 3}, nil)
+	shootWorkshop(t, dir, "", 1500*time.Millisecond, []int{0, 1, 2, 3, 4}, nil)
 }
 
 func TestScreenshotsWorkshopReal(t *testing.T) {
@@ -184,7 +184,7 @@ func shootWorkshop(t *testing.T, dir, suffix string, wait time.Duration, tabs []
 		png.Encode(f, w.Canvas().Capture())
 		f.Close()
 	}
-	names := []string{"Workshop-MySubscriptions", "Workshop-PopularRecent", "Workshop-Collections", "Workshop-PackCollection"}
+	names := []string{"Workshop-MySubscriptions", "Workshop-SearchForCollection", "Workshop-Search", "Workshop-PopularRecentMods", "Workshop-MySubscribedCollection"}
 	for _, i := range tabs {
 		inner.SelectIndex(i)
 		time.Sleep(wait)
