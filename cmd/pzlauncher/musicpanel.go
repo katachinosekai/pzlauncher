@@ -213,6 +213,7 @@ func (u *ui) musicCard() fyne.CanvasObject {
 		musicChanged()
 	}
 	musicState.refresh()
+	u.onMusicChange(musicState.refresh)
 
 	note := newMuted("Uses your own music files (mp3, ogg, wav, flac) from the folder you choose, including subfolders. Music pauses while Project Zomboid is running.", false)
 	volRow := container.NewBorder(nil, nil, widget.NewLabel("Volume"), volLabel, vol)

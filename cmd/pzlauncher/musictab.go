@@ -111,7 +111,19 @@ func (u *ui) musicTab() fyne.CanvasObject {
 	listArea.SetMinSize(fyne.NewSize(0, 360))
 	library := settingsSection("Library", "", search, count.rt, container.NewStack(listArea, list))
 	extra := u.extraMusicCards()
-	cards := []fyne.CanvasObject{extra[0], u.musicCard(), library}
+	folderCard := u.musicCard()
+	showFolder := func() {
+		if musicSource() == music.SourceSpotify {
+			folderCard.Hide()
+			library.Hide()
+		} else {
+			folderCard.Show()
+			library.Show()
+		}
+	}
+	showFolder()
+	u.onMusicChange(showFolder)
+	cards := []fyne.CanvasObject{extra[0], folderCard, library}
 	cards = append(cards, extra[1:]...)
 	return container.NewVScroll(container.NewVBox(cards...))
 }
@@ -180,6 +192,7 @@ func (u *ui) miniPlayer() fyne.CanvasObject {
 	pos := 0
 	sync := func() {
 		if np.paused {
+			pos = 0
 			toggle.SetIcon(theme.MediaPlayIcon())
 		} else {
 			toggle.SetIcon(theme.MediaPauseIcon())

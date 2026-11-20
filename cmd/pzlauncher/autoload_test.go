@@ -20,9 +20,13 @@ func TestBrowseLoadsNextPageNearBottom(t *testing.T) {
 	w := test.NewWindow(nil)
 	defer w.Close()
 	var calls atomic.Int32
+	release := make(chan struct{})
 	deps := fakeWorkshopDeps()
 	deps.browse = func(ctx context.Context, q workshop.BrowseQuery) (*workshop.BrowseResult, error) {
 		calls.Add(1)
+		if q.Page > 1 {
+			<-release
+		}
 		r := &workshop.BrowseResult{Page: q.Page, TotalPages: 3, Total: 90}
 		for i := 0; i < 30; i++ {
 			r.Items = append(r.Items, workshop.Details{ID: fmt.Sprintf("%d", q.Page*100+i), Title: fmt.Sprintf("Mod %d-%d", q.Page, i), Subscriptions: int64(i)})
@@ -54,7 +58,9 @@ func TestBrowseLoadsNextPageNearBottom(t *testing.T) {
 	}
 	find(view)
 	fyne.Do(list.ScrollToBottom)
-	time.Sleep(800 * time.Millisecond)
+	time.Sleep(300 * time.Millisecond)
+	close(release)
+	time.Sleep(500 * time.Millisecond)
 	if calls.Load() < 2 {
 		t.Fatalf("scrolling to the bottom did not load page 2 (calls=%d)", calls.Load())
 	}
