@@ -27,7 +27,7 @@ type wsPending struct {
 
 type wsSession struct {
 	b          *wsBrowser
-	label      *widget.Label
+	label      *autoLabel
 	signInBtn  *widget.Button
 	signOutBtn *widget.Button
 
@@ -49,10 +49,10 @@ type wsSession struct {
 
 func newWSSession(b *wsBrowser) *wsSession {
 	s := &wsSession{b: b, reqs: map[int]wsPending{}}
-	s.label = widget.NewLabel("")
+	s.label = newAutoLabel()
 	s.label.Truncation = fyne.TextTruncateEllipsis
-	s.signInBtn = widget.NewButtonWithIcon("Sign in to Steam", theme.LoginIcon(), func() { s.askSignIn() })
-	s.signOutBtn = widget.NewButtonWithIcon("Sign out", theme.LogoutIcon(), func() { s.signOut() })
+	s.signInBtn = widget.NewButtonWithIcon("Sign Into Steam", theme.LoginIcon(), func() { s.askSignIn() })
+	s.signOutBtn = widget.NewButtonWithIcon("Sign Out of Steam", theme.LogoutIcon(), func() { s.signOut() })
 	s.signOutBtn.Hide()
 	return s
 }
@@ -89,11 +89,13 @@ func (s *wsSession) refresh() {
 		s.label.SetText("")
 	}
 	if s.signedIn && !s.fallback {
-		s.signInBtn.Hide()
-		s.signOutBtn.Show()
+		s.signInBtn.SetText("Sign Out of Steam")
+		s.signInBtn.SetIcon(theme.LogoutIcon())
+		s.signInBtn.OnTapped = s.signOut
 	} else {
-		s.signOutBtn.Hide()
-		s.signInBtn.Show()
+		s.signInBtn.SetText("Sign Into Steam")
+		s.signInBtn.SetIcon(theme.LoginIcon())
+		s.signInBtn.OnTapped = s.askSignIn
 	}
 }
 
@@ -255,7 +257,7 @@ func (s *wsSession) signOut() {
 	}
 	persistent := !s.ephemeral
 	s.label.SetText("Signing out...")
-	s.signOutBtn.Disable()
+	s.signInBtn.Disable()
 	go func() {
 		s.b.ctl.CloseWait(5 * time.Second)
 		if persistent {
@@ -263,7 +265,7 @@ func (s *wsSession) signOut() {
 			_ = os.RemoveAll(webview.CacheDir())
 		}
 		fyne.Do(func() {
-			s.signOutBtn.Enable()
+			s.signInBtn.Enable()
 			s.known, s.signedIn, s.name = false, false, ""
 			s.refresh()
 			s.send(webview.Command{Op: webview.OpState})

@@ -73,3 +73,21 @@ func (b *wsBrowser) searchTab() (fyne.CanvasObject, func()) {
 	}
 	return view, b.searchShown
 }
+
+type autoLabel struct{ widget.Label }
+
+func newAutoLabel() *autoLabel {
+	l := &autoLabel{}
+	l.ExtendBaseWidget(l)
+	l.Hide()
+	return l
+}
+
+func (l *autoLabel) SetText(s string) {
+	l.Label.SetText(s)
+	if s == "" {
+		l.Hide()
+	} else {
+		l.Show()
+	}
+}

@@ -92,7 +92,7 @@ type wsBrowser struct {
 	deps           wsDeps
 	ctl            *webview.Controller
 	thumbs         *thumbCache
-	status         *widget.Label
+	status         *autoLabel
 	sess           *wsSession
 
 	busy     map[string]bool
@@ -103,7 +103,7 @@ type wsBrowser struct {
 func (u *ui) workshopTab() fyne.CanvasObject {
 	b := &wsBrowser{u: u, deps: workshopDeps, busy: map[string]bool{}, subState: map[string]bool{}}
 	b.thumbs = newThumbCache(b.deps.thumb)
-	b.status = widget.NewLabel("")
+	b.status = newAutoLabel()
 	b.status.Importance = widget.LowImportance
 	b.status.Truncation = fyne.TextTruncateEllipsis
 	b.ctl = &webview.Controller{
@@ -112,7 +112,7 @@ func (u *ui) workshopTab() fyne.CanvasObject {
 	}
 	b.sess = newWSSession(b)
 	u.closers = append(u.closers, b.ctl.Close)
-	top := container.NewVBox(container.NewBorder(nil, nil, nil, container.NewHBox(b.sess.signInBtn, b.sess.signOutBtn), b.sess.label), b.status)
+	top := container.NewVBox(b.sess.label, b.status)
 
 	tabs := container.NewAppTabs(
 		container.NewTabItem("My subscriptions", widget.NewLabel("")),
@@ -159,6 +159,8 @@ func (u *ui) workshopTab() fyne.CanvasObject {
 		ensure()
 		open(tabs.Selected())
 	})
+	u.signButtons = container.NewHBox(b.sess.signInBtn)
+	u.signCheck = b.sess.ensure
 	return container.NewBorder(top, nil, nil, nil, tabs)
 }
 

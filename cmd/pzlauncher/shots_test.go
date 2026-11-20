@@ -34,7 +34,7 @@ func TestScreenshots(t *testing.T) {
 	defer w.Close()
 	u := &ui{app: a, win: w, ctx: ctx, client: update.NewClient()}
 	tabs := u.buildTabs()
-	w.SetContent(container.NewBorder(nil, u.aboutBar(), nil, nil, tabs))
+	w.SetContent(container.NewBorder(nil, u.aboutBar(), nil, nil, u.withSignButton(tabs)))
 	h := float32(820)
 	if v, err := strconv.Atoi(os.Getenv("PZL_SHOTS_H")); err == nil && v > 0 {
 		h = float32(v)

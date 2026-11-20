@@ -12,6 +12,8 @@ import (
 	"fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
+	"fyne.io/fyne/v2/layout"
+	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
 	"github.com/katachinosekai/pzlauncher/internal/install"
@@ -21,13 +23,15 @@ import (
 var version = "dev"
 
 type ui struct {
-	app      fyne.App
-	win      fyne.Window
-	ctx      context.Context
-	client   *update.Client
-	closers  []func()
-	tabHooks map[string]func()
-	winSaved winState
+	app         fyne.App
+	win         fyne.Window
+	ctx         context.Context
+	client      *update.Client
+	closers     []func()
+	tabHooks    map[string]func()
+	winSaved    winState
+	signButtons *fyne.Container
+	signCheck   func()
 }
 
 func (u *ui) onTab(title string, fn func()) {
@@ -69,13 +73,19 @@ func main() {
 	u.loadMusic()
 	tabs := u.buildTabs()
 	a.Lifecycle().SetOnStarted(func() {
+		if u.signCheck != nil {
+			go func() {
+				time.Sleep(3 * time.Second)
+				fyne.Do(u.signCheck)
+			}()
+		}
 		if install.Elevated() {
 			dialog.ShowInformation("Running as administrator", "PZ Launcher is running as administrator. Installing, changing launch options and restarting Steam are blocked: Steam and the game would start as administrator too. Close the launcher and start it normally.", w)
 		}
 		u.nativeRestore()
 		u.askMusicOnce()
 	})
-	w.SetContent(container.NewBorder(nil, u.aboutBar(), nil, nil, tabs))
+	w.SetContent(container.NewBorder(nil, u.aboutBar(), nil, nil, u.withSignButton(tabs)))
 	u.restoreWindow(fyne.NewSize(900, 820))
 	u.watchWindow()
 	w.SetCloseIntercept(func() {
@@ -193,4 +203,18 @@ func (u *ui) selfUpdate(rel *update.Release, label *widget.Label) {
 			}, u.win)
 		})
 	}()
+}
+
+func (u *ui) withSignButton(tabs *container.AppTabs) fyne.CanvasObject {
+	if u.signButtons == nil {
+		return tabs
+	}
+	barH := container.NewAppTabs(container.NewTabItem("X", widget.NewLabel(""))).MinSize().Height - widget.NewLabel("").MinSize().Height
+	wIn := widget.NewButtonWithIcon("Sign Into Steam", theme.LoginIcon(), nil).MinSize()
+	wOut := widget.NewButtonWithIcon("Sign Out of Steam", theme.LogoutIcon(), nil).MinSize()
+	size := fyne.NewSize(max(wIn.Width, wOut.Width), max(wIn.Height, wOut.Height))
+	fixed := container.NewGridWrap(size, u.signButtons.Objects...)
+	pad := max((barH-size.Height)/2, 0)
+	row := container.New(layout.NewCustomPaddedLayout(pad, 0, 0, 0), container.NewBorder(nil, nil, nil, fixed))
+	return container.NewStack(tabs, container.NewVBox(row))
 }
