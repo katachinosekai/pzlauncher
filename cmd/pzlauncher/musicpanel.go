@@ -36,6 +36,7 @@ func (u *ui) loadMusic() {
 			if musicState.nowPlay != nil {
 				musicState.nowPlay.SetText("Now playing: " + name)
 			}
+			musicChanged()
 		})
 	}
 	go func() {
@@ -54,7 +55,7 @@ func (u *ui) loadMusic() {
 			}
 		}
 	}()
-	if musicState.cfg.Enabled && musicState.cfg.Folder != "" {
+	if musicState.cfg.Enabled && musicState.cfg.Folder != "" && musicSource() == music.SourceFolder {
 		_ = launcherMusic.Start(musicState.cfg.Folder, musicState.cfg.Shuffle, musicState.cfg.Volume)
 	}
 }
@@ -66,10 +67,14 @@ func (u *ui) saveMusic() {
 	if musicState.refresh != nil {
 		musicState.refresh()
 	}
+	musicChanged()
 }
 
 func (u *ui) startMusic() error {
 	c := musicState.cfg
+	if musicSource() == music.SourceSpotify {
+		return nil
+	}
 	if c.Folder == "" {
 		return errors.New("choose a music folder first")
 	}
@@ -102,7 +107,7 @@ func (u *ui) askMusicOnce() {
 	if musicState.cfg.Asked {
 		return
 	}
-	msg := widget.NewLabel("Play background music while the launcher is open?\n\nYou pick a folder with your own music (mp3, ogg, wav or flac). It pauses while Project Zomboid is running. You can change this any time under Settings > Launcher music.")
+	msg := widget.NewLabel("Play background music while the launcher is open?\n\nYou pick a folder with your own music (mp3, ogg, wav or flac). It pauses while Project Zomboid is running. You can change this any time in the Music tab.")
 	msg.Wrapping = fyne.TextWrapWord
 	d := dialog.NewCustomConfirm("Launcher music", "Choose music folder...", "No thanks", msg, func(yes bool) {
 		musicState.cfg.Asked = true
@@ -205,6 +210,7 @@ func (u *ui) musicCard() fyne.CanvasObject {
 	pause.OnTapped = func() {
 		launcherMusic.SetPaused(!launcherMusic.Paused())
 		musicState.refresh()
+		musicChanged()
 	}
 	musicState.refresh()
 

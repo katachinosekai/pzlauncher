@@ -27,7 +27,14 @@ type Config struct {
 	Folder  string `json:"folder"`
 	Volume  int    `json:"volume"`
 	Shuffle bool   `json:"shuffle"`
+	Source  string `json:"source,omitempty"`
+	GameVol string `json:"gameMusicVolume,omitempty"`
 }
+
+const (
+	SourceFolder  = "folder"
+	SourceSpotify = "spotify"
+)
 
 func ConfigPath() (string, error) {
 	d, err := os.UserConfigDir()
@@ -123,6 +130,9 @@ type playlist struct {
 	order   []int
 	pos     int
 	shuffle bool
+	want    int
+	curPath string
+	hist    []int
 }
 
 func (pl *playlist) next() bool {
@@ -131,6 +141,15 @@ func (pl *playlist) next() bool {
 		pl.closer, pl.cur = nil, nil
 	}
 	for tries := 0; tries < len(pl.tracks); tries++ {
+		if pl.want >= 0 && pl.want < len(pl.tracks) {
+			idx := pl.want
+			pl.want = -1
+			if s, format, err := decode(pl.tracks[idx]); err == nil {
+				pl.use(idx, s, format)
+				return true
+			}
+			continue
+		}
 		if pl.pos >= len(pl.order) {
 			pl.pos = 0
 			if pl.shuffle {
@@ -143,15 +162,24 @@ func (pl *playlist) next() bool {
 		if err != nil {
 			continue
 		}
-		pl.closer = s
-		pl.cur = s
-		if format.SampleRate != sampleRate {
-			pl.cur = beep.Resample(3, format.SampleRate, sampleRate, s)
-		}
-		go pl.p.announce(path)
+		pl.use(pl.order[pl.pos-1], s, format)
 		return true
 	}
 	return false
+}
+
+func (pl *playlist) use(idx int, s beep.StreamSeekCloser, format beep.Format) {
+	pl.closer = s
+	pl.cur = s
+	if format.SampleRate != sampleRate {
+		pl.cur = beep.Resample(3, format.SampleRate, sampleRate, s)
+	}
+	pl.curPath = pl.tracks[idx]
+	pl.hist = append(pl.hist, idx)
+	if len(pl.hist) > 200 {
+		pl.hist = pl.hist[len(pl.hist)-200:]
+	}
+	go pl.p.announce(pl.curPath)
 }
 
 func (pl *playlist) Stream(samples [][2]float64) (int, bool) {
@@ -224,7 +252,7 @@ func (p *Player) Start(folder string, shuffle bool, volume int) error {
 	if shuffle {
 		rand.Shuffle(len(order), func(i, j int) { order[i], order[j] = order[j], order[i] })
 	}
-	pl := &playlist{p: p, tracks: tracks, order: order, shuffle: shuffle}
+	pl := &playlist{p: p, tracks: tracks, order: order, shuffle: shuffle, want: -1}
 	level, silent := volumeLevel(volume)
 	ctrl := &beep.Ctrl{Streamer: pl}
 	vol := &effects.Volume{Streamer: ctrl, Base: 2, Volume: level, Silent: silent}
@@ -303,4 +331,62 @@ func (p *Player) Next() {
 	lockOut()
 	p.pl.skip = true
 	unlockOut()
+}
+
+func (p *Player) Tracks() []string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.pl == nil {
+		return nil
+	}
+	return append([]string(nil), p.pl.tracks...)
+}
+
+func (p *Player) Current() string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.pl == nil {
+		return ""
+	}
+	lockOut()
+	defer unlockOut()
+	return p.pl.curPath
+}
+
+func (p *Player) PlayTrack(path string) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.pl == nil {
+		return false
+	}
+	for i, t := range p.pl.tracks {
+		if t == path {
+			lockOut()
+			p.pl.want, p.pl.skip = i, true
+			unlockOut()
+			p.userPaused = false
+			p.apply()
+			return true
+		}
+	}
+	return false
+}
+
+func (p *Player) Prev() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.pl == nil {
+		return
+	}
+	lockOut()
+	defer unlockOut()
+	h := p.pl.hist
+	if len(h) >= 2 {
+		p.pl.want = h[len(h)-2]
+		p.pl.hist = h[:len(h)-2]
+	} else if len(h) == 1 {
+		p.pl.want = h[0]
+		p.pl.hist = h[:0]
+	}
+	p.pl.skip = true
 }

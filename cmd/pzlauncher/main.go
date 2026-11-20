@@ -4,12 +4,14 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"image/color"
 	"os"
 	"runtime"
 	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
+	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/layout"
@@ -213,12 +215,17 @@ func (u *ui) withSignButton(tabs *container.AppTabs) fyne.CanvasObject {
 	if u.signButtons == nil {
 		return tabs
 	}
+	const margin = 4
 	barH := container.NewAppTabs(container.NewTabItem("X", widget.NewLabel(""))).MinSize().Height - widget.NewLabel("").MinSize().Height
 	wIn := widget.NewButtonWithIcon("Sign Into Steam", theme.LoginIcon(), nil).MinSize()
 	wOut := widget.NewButtonWithIcon("Sign Out of Steam", theme.LogoutIcon(), nil).MinSize()
-	size := fyne.NewSize(max(wIn.Width, wOut.Width), max(wIn.Height, wOut.Height))
+	h := max(barH-2*margin-theme.Padding(), 24)
+	size := fyne.NewSize(max(wIn.Width, wOut.Width), min(max(wIn.Height, wOut.Height), h))
 	fixed := container.NewGridWrap(size, u.signButtons.Objects...)
-	pad := max((barH-size.Height)/2, 0)
-	row := container.New(layout.NewCustomPaddedLayout(pad, 0, 0, 0), container.NewBorder(nil, nil, nil, fixed))
+	gap := canvas.NewRectangle(color.Transparent)
+	gap.SetMinSize(fyne.NewSize(16, 1))
+	right := container.NewHBox(u.miniPlayer(), gap, fixed)
+	top := max((barH-size.Height-2*theme.Padding())/2, 0)
+	row := container.New(layout.NewCustomPaddedLayout(top, 0, 0, 0), container.NewBorder(nil, nil, nil, right))
 	return container.NewStack(tabs, container.NewVBox(row))
 }
