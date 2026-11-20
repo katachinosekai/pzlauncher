@@ -189,6 +189,8 @@ func newTree(t *testing.T, goos string) *tree {
 func (tr *tree) opts(goos string, log *[]string) Options {
 	return Options{
 		PackDir:           tr.pack,
+		PackMemory:        true,
+		PackZBBatch:       true,
 		SteamRoot:         tr.steam,
 		ZomboidDir:        tr.zomboid,
 		ZombieBuddyHome:   tr.zbhome,
@@ -498,5 +500,22 @@ func TestNoWorkshop(t *testing.T) {
 	var fe *FatalError
 	if !errors.As(err, &fe) || !strings.Contains(fe.Msg, "no Workshop folder") {
 		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestPackLeavesMemoryAndZBBatchAlone(t *testing.T) {
+	tr := newTree(t, "linux")
+	before := get(t, filepath.Join(tr.game, "ProjectZomboid64.json"))
+	var log []string
+	o := tr.opts("linux", &log)
+	o.PackMemory, o.PackZBBatch = false, false
+	if _, err := Run(context.Background(), o); err != nil {
+		t.Fatalf("%v\n%s", err, strings.Join(log, "\n"))
+	}
+	if get(t, filepath.Join(tr.game, "ProjectZomboid64.json")) != before {
+		t.Fatal("pack install changed ProjectZomboid64.json")
+	}
+	if _, err := os.Stat(filepath.Join(tr.game, "ZBBatch.jar")); err == nil {
+		t.Fatal("pack install copied ZBBatch.jar")
 	}
 }

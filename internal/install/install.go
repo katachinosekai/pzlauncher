@@ -60,6 +60,8 @@ type Options struct {
 	ConfirmApprovals       func([]Approval) bool
 	Now                    func() time.Time
 	SetupZombieBuddy       bool
+	PackMemory             bool
+	PackZBBatch            bool
 	ZombieBuddyJar         string
 	RemoveZombieBuddy      bool
 	RemoveZombieBuddyFiles bool
@@ -163,10 +165,17 @@ func (in *Installer) Steps() []Step {
 		{"versionmax", "42.21 mods on 42.22", in.VersionMax},
 		{"zombiebuddy", "ZombieBuddy setup", in.ZombieBuddy},
 		{"approvals", "ZombieBuddy approvals", in.Approvals},
-		{"memory", "Game memory", in.Memory},
-		{"zbbatch", "ZBBatch", in.ZBBatch},
+		{"memory", "Game memory", in.optional(in.opts.PackMemory, in.Memory)},
+		{"zbbatch", "ZBBatch", in.optional(in.opts.PackZBBatch, in.ZBBatch)},
 		{"modlist", "Mod list", in.ModList},
 	}
+}
+
+func (in *Installer) optional(on bool, f func(context.Context) error) func(context.Context) error {
+	if on {
+		return f
+	}
+	return func(context.Context) error { return nil }
 }
 
 func (in *Installer) startLog() {

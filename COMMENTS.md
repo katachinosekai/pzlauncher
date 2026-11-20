@@ -326,3 +326,4 @@ ZombieBuddy custom jar: pref `zombiebuddy.customJar`; set via the ZombieBuddy ta
 - Elevated: `install.Elevated()`; `install.New` refuses (both Run and ZombieBuddy go through it, so install, launch-option edits and Steam restarts are blocked); Linux main refuses to start as root; Windows shows a warning at start.
 - Log redaction also replaces the user folder name in C:\Users\<name>, /home/<name>, /run/media/<name>, /media/<name>.
 - Already fine: zip extraction rejects symlinks, absolute and ../ paths, 4 GiB cap; built-in browser only opens non-Steam http(s)/steam/mailto links externally after a user gesture.
+Custom Packs no longer sets up ZombieBuddy, memory/Java options or ZBBatch (user 2026-11-19): `Options.PackMemory`/`PackZBBatch` default off (tests switch them on to keep the step coverage), `realInstall` passes no SetupZombieBuddy. ZBBatch is NOT offered anywhere in the launcher (user: "don't add zbbatch to launcher").

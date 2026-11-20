@@ -35,11 +35,6 @@ func zbCustomJar() string {
 	return strings.TrimSpace(a.Preferences().String(prefZBCustom))
 }
 
-func zbWanted() bool {
-	a := fyne.CurrentApp()
-	return a != nil && a.Preferences().Bool(prefZBUse)
-}
-
 type zbStatus struct {
 	gameDir   string
 	libs      string
