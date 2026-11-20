@@ -72,6 +72,7 @@ func main() {
 	defer cancel()
 
 	a.Settings().SetTheme(newAppTheme())
+	a.SetIcon(appIcon)
 	w := a.NewWindow("PZ Launcher")
 	u := &ui{app: a, win: w, ctx: ctx, client: update.NewClient()}
 	confirmApprovals = u.askApprovals
