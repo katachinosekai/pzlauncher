@@ -66,7 +66,7 @@ func (u *ui) logsTab() fyne.CanvasObject {
 		}
 		u.openURL(dir)
 	})
-	what := widget.NewLabel("The zip contains: kept and current game logs, installer logs, mods/default.txt, the mod list with versions, ProjectZomboid64.json and a short system summary (OS, RAM, launcher version, game folder).")
+	what := widget.NewLabel("The zip contains every log: kept and current game logs, everything in Zomboid/Logs plus the last 3 archived sessions (debug logs, chat logs, timers), console, coop and server console, the newest Java crash dumps and GC logs, ZombieBuddy logs and approvals, installer logs, mods/default.txt, the mod list with versions, ProjectZomboid64.json and a short system summary. Very large files keep only their last 32 MiB.")
 	what.Wrapping = fyne.TextWrapWord
 	what.Importance = widget.LowImportance
 	return container.NewVBox(info, container.NewHBox(collect, open), what, status)

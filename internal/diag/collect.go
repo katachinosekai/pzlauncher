@@ -42,6 +42,8 @@ type CollectOptions struct {
 	KeptDir          string
 	InstallerLogDirs []string
 	GameDir          string
+	HomeDir          string
+	ZombieBuddyDir   string
 	Mods             *modlist.Index
 	LauncherVersion  string
 	Now              func() time.Time
@@ -52,6 +54,10 @@ func DefaultCollectOptions(launcherVersion string) CollectOptions {
 	o.ZomboidDir, _ = paths.Zomboid()
 	o.KeptDir, _ = LogsDir()
 	o.InstallerLogDirs = InstallerLogDirs()
+	if h, err := os.UserHomeDir(); err == nil {
+		o.HomeDir = h
+		o.ZombieBuddyDir = filepath.Join(h, ".zombie_buddy")
+	}
 	if root, err := paths.SteamRoot(); err == nil {
 		o.GameDir, _ = paths.GameDir(root)
 	}
@@ -168,6 +174,7 @@ func Collect(w io.Writer, o CollectOptions) ([]string, error) {
 			return z.addFile("ProjectZomboid64.json", filepath.Join(o.GameDir, "ProjectZomboid64.json"))
 		},
 		func() error { return z.addText("mods.txt", modList(o)) },
+		func() error { return addAllLogs(z, o) },
 	}
 	for _, s := range steps {
 		if err := s(); err != nil {
@@ -303,4 +310,89 @@ func modList(o CollectOptions) string {
 		fmt.Fprintf(&b, "%s %s\t%s\t%s\t%s\t%s%s\n", mark, m.ID, m.Version, m.WorkshopID, m.Source, m.Name, jar)
 	}
 	return b.String()
+}
+
+const (
+	keepArchives = 3
+	keepDumps    = 3
+	keepGC       = 3
+)
+
+func addAllLogs(z *zipper, o CollectOptions) error {
+	if o.ZomboidDir != "" {
+		logs := filepath.Join(o.ZomboidDir, "Logs")
+		for _, n := range sortedFiles(logs, "", 0) {
+			if err := z.addFile("game-logs/"+n, filepath.Join(logs, n)); err != nil {
+				return err
+			}
+		}
+		archives, _ := filepath.Glob(filepath.Join(logs, "logs_*"))
+		sort.Strings(archives)
+		if len(archives) > keepArchives {
+			archives = archives[len(archives)-keepArchives:]
+		}
+		for _, a := range archives {
+			for _, n := range sortedFiles(a, "", 0) {
+				if err := z.addFile("game-logs/"+filepath.Base(a)+"/"+n, filepath.Join(a, n)); err != nil {
+					return err
+				}
+			}
+		}
+		for _, n := range []string{"server-console.txt", "coop-console.txt"} {
+			if err := z.addFile("current/"+n, filepath.Join(o.ZomboidDir, n)); err != nil {
+				return err
+			}
+		}
+		if err := addNewest(z, "gc-logs/", []string{o.ZomboidDir}, "gc-*.log", keepGC); err != nil {
+			return err
+		}
+	}
+	dumpDirs := []string{o.GameDir, o.HomeDir, o.ZomboidDir}
+	for _, pat := range []string{"hs_err_pid*.log", "replay_pid*.log"} {
+		if err := addNewest(z, "java-crashes/", dumpDirs, pat, keepDumps); err != nil {
+			return err
+		}
+	}
+	if o.ZombieBuddyDir != "" {
+		for _, n := range sortedFiles(o.ZombieBuddyDir, ".log", 0) {
+			if err := z.addFile("zombiebuddy/"+n, filepath.Join(o.ZombieBuddyDir, n)); err != nil {
+				return err
+			}
+		}
+		for _, n := range []string{"mod_approvals.json", "config.json"} {
+			if err := z.addFile("zombiebuddy/"+n, filepath.Join(o.ZombieBuddyDir, n)); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func addNewest(z *zipper, prefix string, dirs []string, pattern string, keep int) error {
+	type hit struct {
+		path string
+		t    time.Time
+	}
+	var hits []hit
+	for _, d := range dirs {
+		if d == "" {
+			continue
+		}
+		m, _ := filepath.Glob(filepath.Join(d, pattern))
+		for _, p := range m {
+			if st, err := os.Stat(p); err == nil && st.Mode().IsRegular() {
+				hits = append(hits, hit{p, st.ModTime()})
+			}
+		}
+	}
+	sort.Slice(hits, func(i, j int) bool { return hits[i].t.After(hits[j].t) })
+	if len(hits) > keep {
+		hits = hits[:keep]
+	}
+	for _, h := range hits {
+		if err := z.addFile(prefix+filepath.Base(h.path), h.path); err != nil {
+			return err
+		}
+	}
+	return nil
 }
