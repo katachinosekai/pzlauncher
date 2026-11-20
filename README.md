@@ -15,9 +15,9 @@ The launcher can update itself (bottom bar > Check for updates).
 ## Features
 
 - **Play**: saves and servers with pre-launch checks (game version, missing mods, server status), launch straight into a save or server
-- **Mods > Custom Pack**: installs a `PZ-Fixes.zip` fix pack (Workshop collection, settings, ZombieBuddy approvals, memory settings, ZBBatch); dry run shows what would change; backups of everything it replaces
+- **Mods > Custom Packs**: installs a `PZ-Fixes.zip` fix pack (Workshop collection, settings, ZombieBuddy approvals, memory settings, ZBBatch); dry run shows what would change; backups of everything it replaces
 - **Workshop**: search and browse the Workshop, your subscriptions and the pack collection; subscribe in the background after signing in on Steam's own page
-- **Mods**: Lua mods (mod list, load order, presets), Java mods (ZombieBuddy approvals), ZombieBuddy setup (version picker, custom jar) and Custom Pack
+- **Mods**: Lua mods (mod list, load order, presets), Java mods (ZombieBuddy approvals), ZombieBuddy setup (version picker, custom jar) and Custom Packs
 - **Settings**: memory, Java options, game options; log collection from the bottom bar
 
 ## Build
