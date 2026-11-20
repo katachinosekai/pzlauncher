@@ -30,7 +30,7 @@ func init() {
 	if len(os.Args) > 1 && os.Args[1] == webview.HelperFlag {
 		os.Exit(webview.RunHelper(webview.Options{Open: install.DefaultSystem().OpenURL, Ephemeral: slices.Contains(os.Args[2:], webview.EphemeralFlag)}))
 	}
-	registerTab(25, "Workshop", (*ui).workshopTab)
+	registerTab(35, "Workshop", (*ui).workshopTab)
 }
 
 type wsDeps struct {
