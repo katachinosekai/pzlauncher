@@ -41,7 +41,9 @@ var (
 
 const (
 	wmDestroy    = 0x0002
+	wmMove       = 0x0003
 	wmSize       = 0x0005
+	sizeMinimize = 1
 	wmClose      = 0x0010
 	wmCommand    = 0x0111
 	wmApp        = 0x8000
@@ -191,7 +193,18 @@ func (e *winEngine) Show() {
 		pShowWindow.Call(e.hwnd, swRestore)
 	}
 	pShowWindow.Call(e.hwnd, swShow)
+	e.layout()
+	e.showView()
 	pSetForegroundWindow.Call(e.hwnd)
+}
+
+func (e *winEngine) showView() {
+	if e.chromium == nil {
+		return
+	}
+	e.chromium.Show()
+	e.chromium.Resize()
+	e.chromium.NotifyParentWindowPositionChanged()
 }
 
 func (e *winEngine) Quit() { pDestroyWindow.Call(e.hwnd) }
@@ -279,8 +292,15 @@ func wndProc(hwnd uintptr, msg uint32, wp, lp uintptr) uintptr {
 	if e != nil && hwnd == e.hwnd {
 		switch msg {
 		case wmSize:
+			if wp == sizeMinimize {
+				return 0
+			}
 			e.layout()
 			return 0
+		case wmMove:
+			if e.chromium != nil {
+				e.chromium.NotifyParentWindowPositionChanged()
+			}
 		case wmCommand:
 			switch wp & 0xffff {
 			case idOK:
@@ -360,6 +380,16 @@ func runEngine(h *Helper, o Options) error {
 	if r, _, err := pRegisterClassExW.Call(uintptr(unsafe.Pointer(&wc))); r == 0 {
 		return err
 	}
+	hc := wndClassExW{
+		WndProc:   pDefWindowProcW.Addr(),
+		Instance:  inst,
+		Cursor:    windows.Handle(cursor),
+		ClassName: windows.StringToUTF16Ptr("PZLauncherHost"),
+	}
+	hc.Size = uint32(unsafe.Sizeof(hc))
+	if r, _, err := pRegisterClassExW.Call(uintptr(unsafe.Pointer(&hc))); r == 0 {
+		return err
+	}
 	e.hwnd, _, _ = pCreateWindowExW.Call(0, utf16("PZLauncherBrowser"), utf16("Sign in to Steam - PZ Launcher"), wsOverlap|wsClipCh,
 		cwDefault, cwDefault, 760, 820, 0, 0, uintptr(inst), 0)
 	if e.hwnd == 0 {
@@ -371,7 +401,7 @@ func runEngine(h *Helper, o Options) error {
 	e.secure = e.child("STATIC", "", ssCenterV, idSecure)
 	e.edit = e.child("EDIT", "", wsTabStop|wsBorder|esAutoH, idEdit)
 	e.goBtn = e.child("BUTTON", "Go", wsTabStop|bsDefPush, idOK)
-	e.host = e.child("STATIC", "", wsClipCh, 0)
+	e.host = e.child("PZLauncherHost", "", wsClipCh, 0)
 	e.layout()
 
 	c := edge.NewChromium()
@@ -389,7 +419,7 @@ func runEngine(h *Helper, o Options) error {
 		return errors.New("Microsoft Edge WebView2 Runtime is not available")
 	}
 	e.chromium = c
-	c.Resize()
+	e.showView()
 	ctl := c.GetController()
 	if ctl == nil {
 		return errors.New("WebView2 controller missing")

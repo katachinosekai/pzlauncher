@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
@@ -38,6 +39,10 @@ func main() {
 	showVersion := flag.Bool("version", false, "print the launcher version")
 	cli := registerCLI()
 	flag.Parse()
+	a := app.NewWithID("io.github.kata.pzlauncher")
+	if m := a.Metadata(); version == "dev" && m.ID != "" && m.Version != "" {
+		version = m.Version
+	}
 	if *showVersion {
 		fmt.Println(version)
 		return
@@ -50,7 +55,6 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	a := app.NewWithID("io.github.kata.pzlauncher")
 	w := a.NewWindow("PZ Launcher")
 	u := &ui{app: a, win: w, ctx: ctx, client: update.NewClient()}
 
@@ -78,40 +82,68 @@ func main() {
 func (u *ui) aboutBar() fyne.CanvasObject {
 	label := widget.NewLabel("PZ Launcher")
 	var btn *widget.Button
+	var rel *update.Release
+	var check func(quiet bool)
 	btn = widget.NewButton("Check for launcher update", func() {
+		if rel != nil {
+			r := rel
+			dialog.ShowConfirm("Launcher update", fmt.Sprintf("Update the launcher from %s to %s?", version, r.Manifest.LauncherVersion), func(ok bool) {
+				if ok {
+					u.selfUpdate(r, label)
+				}
+			}, u.win)
+			return
+		}
+		check(false)
+	})
+	check = func(quiet bool) {
 		btn.Disable()
-		label.SetText("PZ Launcher - checking for updates...")
+		if !quiet {
+			label.SetText("PZ Launcher - checking for updates...")
+		}
 		go func() {
 			defer fyne.Do(btn.Enable)
-			rel, err := u.client.Latest(u.ctx)
+			r, err := u.client.Latest(u.ctx)
 			if err != nil {
-				fyne.Do(func() {
-					label.SetText("PZ Launcher")
-					dialog.ShowError(err, u.win)
-				})
+				if !quiet {
+					fyne.Do(func() {
+						label.SetText("PZ Launcher")
+						dialog.ShowError(err, u.win)
+					})
+				}
 				return
 			}
-			latest := rel.Manifest.LauncherVersion
-			if !update.LauncherOutdated(latest, version) {
-				fyne.Do(func() {
-					msg := "PZ Launcher (up to date)"
-					if version == "dev" {
-						msg = "PZ Launcher (latest release " + latest + ")"
-					}
-					label.SetText(msg)
-				})
+			latest := r.Manifest.LauncherVersion
+			if !update.LauncherOutdated(latest, version) || update.CurrentBinaryName() == "" || r.Asset(update.CurrentBinaryName()) == nil {
+				if !quiet {
+					fyne.Do(func() {
+						msg := "PZ Launcher (up to date)"
+						if version == "dev" {
+							msg = "PZ Launcher (latest release " + latest + ")"
+						}
+						label.SetText(msg)
+					})
+				}
 				return
 			}
 			fyne.Do(func() {
+				rel = r
 				label.SetText("PZ Launcher - " + latest + " available")
-				dialog.ShowConfirm("Launcher update", fmt.Sprintf("Update the launcher from %s to %s?", version, latest), func(ok bool) {
-					if ok {
-						u.selfUpdate(rel, label)
-					}
-				}, u.win)
+				btn.SetText("Update to " + latest)
+				btn.Importance = widget.HighImportance
+				btn.Refresh()
+				if !quiet {
+					btn.OnTapped()
+				}
 			})
 		}()
-	})
+	}
+	if version != "dev" {
+		go func() {
+			time.Sleep(3 * time.Second)
+			fyne.Do(func() { check(true) })
+		}()
+	}
 	note := widget.NewLabel(disclaimer)
 	note.Truncation = fyne.TextTruncateEllipsis
 	about := widget.NewButton("About & credits", u.showAbout)

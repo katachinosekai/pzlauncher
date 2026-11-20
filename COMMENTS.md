@@ -306,3 +306,9 @@ Optional ZombieBuddy (ZB, Workshop 3619862853, github.com/zed-0xff/ZombieBuddy) 
 
 `winstate.go`: `<config>/PZLauncher/window.json` keeps the content size (Fyne units), saved in the close intercept, restored before show (ignored below 600x500). Windows (`winstate_windows.go`): GetWindowPlacement on close (normal rect + maximized), SetWindowPlacement in OnStarted if the rect is still on a monitor. Linux: Fyne/GLFW can't place windows on Wayland; on kata's KDE the position is remembered by a KWin rule (`~/.config/kwinrulesrc` group pzlauncher-remember-position, wmclass io.github.kata.pzlauncher = the Fyne app ID used as Wayland app_id). Changing the app ID breaks that rule.
 Play tab: lists sit in a VScroll so opening save details can't raise the window's min height (was ~500 px closed / ~790 open, cut off the tab bar); now 172.
+
+## releases and self-update (2026-11-19)
+
+`scripts/release.sh <version> [--publish] [--prerelease]`: fyne-cross windows + linux with `-app-version`, AppImage via appimagetool (`APPIMAGETOOL`, default ~/.local/share/appimagetool/appimagetool), checks the AppImage's `-version`, writes manifest.json, and with --publish tags v<version>, pushes the tag and creates the GitHub release from `release/notes-v<version>.md`. Output in release/v<version>/ (gitignored).
+Version: fyne-cross ignores `-ldflags -X`, so `main.version` stays "dev" in packaged builds; main takes `a.Metadata().Version` when the packaged metadata has an ID (fyne package writes it; plain `go build` has none, so dev builds stay "dev" and never self-update). v0.1.0 binaries report "dev" and can't self-update: v0.1.0 users must download once by hand.
+Update check: quiet check 3 s after start (non-dev only); a newer release turns the bottom-bar button into "Update to X". `/releases/latest` skips pre-releases, so test builds are never offered.
