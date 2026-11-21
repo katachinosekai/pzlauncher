@@ -183,3 +183,52 @@ func TestRedactUserPaths(t *testing.T) {
 		t.Fatalf("paths mangled: %q", out)
 	}
 }
+
+func TestRedactSecretVars(t *testing.T) {
+	in := "GITHUB_TOKEN=ghp_abc\nAWS_SECRET_ACCESS_KEY=xyz\n  API_KEY = k1\nPATH=/usr/bin\nkeyBinding = 5\n"
+	out := Redact(in)
+	for _, bad := range []string{"ghp_abc", "xyz", "k1"} {
+		if strings.Contains(out, bad) {
+			t.Errorf("%q not redacted: %s", bad, out)
+		}
+	}
+	if !strings.Contains(out, "PATH=/usr/bin") || !strings.Contains(out, "keyBinding = 5") || !strings.Contains(out, "GITHUB_TOKEN=<redacted>") {
+		t.Error(out)
+	}
+}
+
+func TestCollectLogsOnly(t *testing.T) {
+	z := t.TempDir()
+	kept := t.TempDir()
+	game := t.TempDir()
+	write(t, filepath.Join(z, "console.txt"), "console", time.Time{})
+	write(t, filepath.Join(z, "Logs", "2026-11-19_05-00_DebugLog.txt"), "debug", time.Time{})
+	write(t, filepath.Join(z, "mods", "default.txt"), "mods\n{\n}\n", time.Time{})
+	write(t, filepath.Join(kept, "console-20261119-040000.txt"), "old", time.Time{})
+	write(t, filepath.Join(game, "ProjectZomboid64.json"), "{}", time.Time{})
+	old := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
+	write(t, filepath.Join(game, "hs_err_pid1.log"), "SECRET_TOKEN=t0k\ncrash", old)
+	write(t, filepath.Join(game, "hs_err_pid2.log"), "crash2", time.Time{})
+	o := CollectOptions{ZomboidDir: z, KeptDir: kept, GameDir: game, LogsOnly: true, Extra: map[string]string{"report.txt": "what happened 76561198000000001"}}
+	var buf bytes.Buffer
+	files, err := Collect(&buf, o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"report.txt", "kept-logs/console-20261119-040000.txt", "current/console.txt", "current/2026-11-19_05-00_DebugLog.txt", "java-crashes/hs_err_pid2.log", "java-crashes/hs_err_pid1.log"}
+	if strings.Join(files, ",") != strings.Join(want, ",") {
+		t.Fatalf("got %v", files)
+	}
+	zr, _ := zip.NewReader(bytes.NewReader(buf.Bytes()), int64(buf.Len()))
+	for _, f := range zr.File {
+		rc, _ := f.Open()
+		b, _ := io.ReadAll(rc)
+		rc.Close()
+		if strings.Contains(string(b), "t0k") || strings.Contains(string(b), "76561198000000001") {
+			t.Errorf("%s not redacted: %s", f.Name, b)
+		}
+	}
+	if got := CrashDumpsSince(o, old.Add(time.Hour)); len(got) != 1 || filepath.Base(got[0]) != "hs_err_pid2.log" {
+		t.Fatal(got)
+	}
+}

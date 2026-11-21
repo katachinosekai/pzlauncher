@@ -29,10 +29,12 @@ var (
 	reWinUser   = regexp.MustCompile(`(?i)([a-z]:[\\/]+(?:users|documents and settings)[\\/]+)[^\\/\s"':;]+`)
 	reNixUser   = regexp.MustCompile(`(/(?:home|Users)/|/run/media/|/media/)[^/\s"':;]+`)
 	reModLine   = regexp.MustCompile(`^\s*mod\s*=\s*\\?([^,]+?)\s*,?\s*$`)
+	reSecretVar = regexp.MustCompile(`(?m)^(\s*[A-Z0-9_]*(?:TOKEN|KEY|SECRET|PASSWORD|PASSWD|CREDENTIAL|AUTH)[A-Z0-9_]*\s*=\s*).+$`)
 )
 
 func Redact(s string) string {
 	s = reSteamID.ReplaceAllString(s, "7656119##########")
+	s = reSecretVar.ReplaceAllString(s, "${1}<redacted>")
 	s = rePassword.ReplaceAllString(s, "${1}<redacted>")
 	s = rePassJSON.ReplaceAllString(s, `${1}"<redacted>"`)
 	s = rePassSpace.ReplaceAllString(s, "${1}<redacted>")
@@ -51,6 +53,8 @@ type CollectOptions struct {
 	Mods             *modlist.Index
 	LauncherVersion  string
 	Now              func() time.Time
+	LogsOnly         bool
+	Extra            map[string]string
 }
 
 func DefaultCollectOptions(launcherVersion string) CollectOptions {
@@ -140,16 +144,56 @@ func Collect(w io.Writer, o CollectOptions) ([]string, error) {
 		now = o.Now
 	}
 	z := &zipper{zw: zip.NewWriter(w), now: now(), names: map[string]bool{}}
-	steps := []func() error{
-		func() error { return z.addText("system.txt", systemSummary(o, now())) },
-		func() error {
-			for _, n := range sortedFiles(o.KeptDir, ".txt", 0) {
-				if err := z.addFile("kept-logs/"+n, filepath.Join(o.KeptDir, n)); err != nil {
-					return err
+	var steps []func() error
+	extras := make([]string, 0, len(o.Extra))
+	for n := range o.Extra {
+		extras = append(extras, n)
+	}
+	sort.Strings(extras)
+	for _, n := range extras {
+		steps = append(steps, func() error { return z.addText(n, o.Extra[n]) })
+	}
+	if o.LogsOnly {
+		steps = append(steps,
+			func() error { return addKept(z, o) },
+			func() error {
+				if o.ZomboidDir == "" {
+					return nil
 				}
-			}
-			return nil
-		},
+				for _, s := range currentLogs(o.ZomboidDir) {
+					if err := z.addFile("current/"+filepath.Base(s.path), s.path); err != nil {
+						return err
+					}
+				}
+				return nil
+			},
+			func() error { return addCrashDumps(z, o) },
+		)
+	} else {
+		steps = append(steps, fullSteps(z, o, now)...)
+	}
+	for _, s := range steps {
+		if err := s(); err != nil {
+			z.zw.Close()
+			return z.files, err
+		}
+	}
+	return z.files, z.zw.Close()
+}
+
+func addKept(z *zipper, o CollectOptions) error {
+	for _, n := range sortedFiles(o.KeptDir, ".txt", 0) {
+		if err := z.addFile("kept-logs/"+n, filepath.Join(o.KeptDir, n)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func fullSteps(z *zipper, o CollectOptions, now func() time.Time) []func() error {
+	return []func() error{
+		func() error { return z.addText("system.txt", systemSummary(o, now())) },
+		func() error { return addKept(z, o) },
 		func() error {
 			if o.ZomboidDir == "" {
 				return nil
@@ -180,13 +224,6 @@ func Collect(w io.Writer, o CollectOptions) ([]string, error) {
 		func() error { return z.addText("mods.txt", modList(o)) },
 		func() error { return addAllLogs(z, o) },
 	}
-	for _, s := range steps {
-		if err := s(); err != nil {
-			z.zw.Close()
-			return z.files, err
-		}
-	}
-	return z.files, z.zw.Close()
 }
 
 func sortedFiles(dir, ext string, last int) []string {
@@ -351,11 +388,8 @@ func addAllLogs(z *zipper, o CollectOptions) error {
 			return err
 		}
 	}
-	dumpDirs := []string{o.GameDir, o.HomeDir, o.ZomboidDir}
-	for _, pat := range []string{"hs_err_pid*.log", "replay_pid*.log"} {
-		if err := addNewest(z, "java-crashes/", dumpDirs, pat, keepDumps); err != nil {
-			return err
-		}
+	if err := addCrashDumps(z, o); err != nil {
+		return err
 	}
 	if o.ZombieBuddyDir != "" {
 		for _, n := range sortedFiles(o.ZombieBuddyDir, ".log", 0) {
@@ -370,6 +404,36 @@ func addAllLogs(z *zipper, o CollectOptions) error {
 		}
 	}
 	return nil
+}
+
+var dumpPatterns = []string{"hs_err_pid*.log", "replay_pid*.log"}
+
+func dumpDirs(o CollectOptions) []string { return []string{o.GameDir, o.HomeDir, o.ZomboidDir} }
+
+func addCrashDumps(z *zipper, o CollectOptions) error {
+	for _, pat := range dumpPatterns {
+		if err := addNewest(z, "java-crashes/", dumpDirs(o), pat, keepDumps); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func CrashDumpsSince(o CollectOptions, since time.Time) []string {
+	var out []string
+	for _, d := range dumpDirs(o) {
+		if d == "" {
+			continue
+		}
+		m, _ := filepath.Glob(filepath.Join(d, dumpPatterns[0]))
+		for _, p := range m {
+			if st, err := os.Stat(p); err == nil && st.Mode().IsRegular() && st.ModTime().After(since) {
+				out = append(out, p)
+			}
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 func addNewest(z *zipper, prefix string, dirs []string, pattern string, keep int) error {

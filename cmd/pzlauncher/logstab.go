@@ -29,7 +29,9 @@ func (u *ui) collectLogs(btn *widget.Button) {
 		btn.SetText("Collecting...")
 		go func() {
 			diag.KeepLastLog()
-			files, err := diag.Collect(w, diag.DefaultCollectOptions(version))
+			o := diag.DefaultCollectOptions(version)
+			o.LogsOnly = true
+			files, err := diag.Collect(w, o)
 			if cerr := w.Close(); err == nil {
 				err = cerr
 			}
@@ -40,7 +42,7 @@ func (u *ui) collectLogs(btn *widget.Button) {
 					dialog.ShowError(fmt.Errorf("collecting logs failed: %w", err), u.win)
 					return
 				}
-				dialog.ShowInformation("Logs collected", fmt.Sprintf("Saved %d files to\n%s\n\nSteam IDs and passwords were removed.", len(files), w.URI().Path()), u.win)
+				dialog.ShowInformation("Logs collected", fmt.Sprintf("Saved %d files to\n%s\n\nZomboid logs and Java crash dumps only (Report a problem sends more). Steam IDs, passwords, keys and your user name were removed.", len(files), w.URI().Path()), u.win)
 			})
 		}()
 	}, u.win)
@@ -58,5 +60,5 @@ func (u *ui) openLogsFolder() {
 		dialog.ShowError(err, u.win)
 		return
 	}
-	u.openURL(dir)
+	u.openFolder(dir)
 }

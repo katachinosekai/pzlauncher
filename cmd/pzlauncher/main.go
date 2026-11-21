@@ -91,6 +91,7 @@ func main() {
 		}
 		u.nativeRestore()
 		u.askMusicOnce()
+		u.watchCrashes()
 	})
 	w.SetContent(container.NewBorder(nil, u.aboutBar(), nil, nil, u.withSignButton(tabs)))
 	u.restoreWindow(fyne.NewSize(900, 820))
@@ -179,7 +180,8 @@ func (u *ui) aboutBar() fyne.CanvasObject {
 	var collect *widget.Button
 	collect = widget.NewButton("Collect logs", func() { u.collectLogs(collect) })
 	openLogs := widget.NewButton("Open logs folder", u.openLogsFolder)
-	return container.NewBorder(nil, nil, label, container.NewHBox(collect, openLogs, about, btn), note)
+	reportBtn := widget.NewButton("Report a problem", func() { u.showReport(false) })
+	return container.NewBorder(nil, nil, label, container.NewHBox(reportBtn, collect, openLogs, about, btn), note)
 }
 
 func (u *ui) selfUpdate(rel *update.Release, label *widget.Label) {
