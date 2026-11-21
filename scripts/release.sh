@@ -55,5 +55,5 @@ if [ "$PUBLISH" = 1 ]; then
 	git -C "$ROOT" tag -a "v$V" -m "PZ Launcher $V"
 	git -C "$ROOT" push origin "v$V"
 	gh release create "v$V" -R "$REPO" $PRE --title "PZ Launcher $V" --notes-file "$NOTES" \
-		PZLauncher-windows-amd64.exe PZLauncher-linux-x86_64.AppImage manifest.json manifest.json.sig
+		PZLauncher-windows-amd64.exe PZLauncher-linux-x86_64.AppImage manifest.json manifest.json.sig THIRD_PARTY_LICENSES.txt
 fi
