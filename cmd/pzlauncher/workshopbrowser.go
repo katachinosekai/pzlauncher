@@ -7,8 +7,10 @@ import (
 	"image/color"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -595,6 +597,44 @@ func sizeAndDate(size int64, updated time.Time) []string {
 	return parts
 }
 
+var buildTag = regexp.MustCompile(`(?i)^\s*build\s*(\d+(?:\.\d+)*)\s*$`)
+
+// buildLabel turns the Workshop's "Build NN" tags into a short label:
+// "41", "42", "41/42" when both, any other build as its number.
+func buildLabel(tags []string) string {
+	seen := map[string]bool{}
+	var nums []string
+	for _, t := range tags {
+		if m := buildTag.FindStringSubmatch(t); m != nil && !seen[m[1]] {
+			seen[m[1]] = true
+			nums = append(nums, m[1])
+		}
+	}
+	sort.Slice(nums, func(i, j int) bool {
+		a, _ := strconv.ParseFloat(nums[i], 64)
+		c, _ := strconv.ParseFloat(nums[j], 64)
+		if a != c {
+			return a < c
+		}
+		return nums[i] < nums[j]
+	})
+	return strings.Join(nums, "/")
+}
+
+// searchInfo is the collapsed line for search results (Popular / Recent,
+// Search for Collection, the magnifier search): build, subscribers, rating, age.
+func searchInfo(d workshop.Details) string {
+	var parts []string
+	if b := buildLabel(d.Tags); b != "" {
+		parts = append(parts, b)
+	}
+	parts = append(parts, popularity(d)...)
+	if rest := detailsInfo(d); rest != "" {
+		parts = append(parts, rest)
+	}
+	return strings.Join(parts, "  ·  ")
+}
+
 func detailsDetail(d workshop.Details) string {
 	return strings.Join(append(popularity(d), sizeAndDate(d.Size, d.Updated)...), "  ·  ")
 }
@@ -677,7 +717,7 @@ func (b *wsBrowser) browseViewSorted(controls fyne.CanvasObject, query func() wo
 					list.ScrollToTop()
 				}
 				for _, d := range r.Items {
-					items = append(items, wsItem{ID: d.ID, Title: d.Title, Info: detailsInfo(d), Detail: detailsDetail(d), Tags: d.Tags, Desc: d.Description, Preview: d.Preview, Collection: d.Collection || q.Collections, subs: d.Subscriptions, stars: d.Stars, size: d.Size, updated: d.Updated.Unix(), seq: len(items)})
+					items = append(items, wsItem{ID: d.ID, Title: d.Title, Info: searchInfo(d), Detail: strings.Join(sizeAndDate(d.Size, d.Updated), "  ·  "), Tags: d.Tags, Desc: d.Description, Preview: d.Preview, Collection: d.Collection || q.Collections, subs: d.Subscriptions, stars: d.Stars, size: d.Size, updated: d.Updated.Unix(), seq: len(items)})
 				}
 				hasMore = r.TotalPages > page && len(r.Items) > 0
 				if order != nil {

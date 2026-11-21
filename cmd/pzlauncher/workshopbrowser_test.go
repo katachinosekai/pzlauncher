@@ -314,6 +314,36 @@ func TestUpdatedAgo(t *testing.T) {
 	}
 }
 
+func TestBuildLabel(t *testing.T) {
+	for _, c := range []struct {
+		tags []string
+		want string
+	}{
+		{[]string{"Build 41", "Map"}, "41"},
+		{[]string{"Build 42", "Vehicles"}, "42"},
+		{[]string{"Build 42", "Build 41"}, "41/42"},
+		{[]string{"Build 40"}, "40"},
+		{[]string{"build 41", "Build 42", "Build 43"}, "41/42/43"},
+		{[]string{"Build 41", "Build 41"}, "41"},
+		{[]string{"Map", "Buildings"}, ""},
+		{nil, ""},
+	} {
+		if got := buildLabel(c.tags); got != c.want {
+			t.Errorf("buildLabel(%q) = %q, want %q", c.tags, got, c.want)
+		}
+	}
+}
+
+func TestSearchInfo(t *testing.T) {
+	d := workshop.Details{Tags: []string{"Build 41", "Build 42"}, Subscriptions: 12345, Stars: 4, Updated: time.Now()}
+	if got, want := searchInfo(d), "41/42  ·  12k subscribers  ·  rating 4/5  ·  Today"; got != want {
+		t.Errorf("searchInfo = %q, want %q", got, want)
+	}
+	if got := searchInfo(workshop.Details{}); got != "" {
+		t.Errorf("empty searchInfo = %q", got)
+	}
+}
+
 func TestRecentItems(t *testing.T) {
 	now := time.Date(2026, 11, 21, 12, 0, 0, 0, time.UTC)
 	at := func(h int) int64 { return now.Add(-time.Duration(h) * time.Hour).Unix() }
