@@ -347,7 +347,7 @@ Value-level settings merge (2026-11-21, user: "pack values win, shown first"):
 - Make a pack: ModOptions.ini is never offered as a whole file (DetectSettings skips it, Build refuses it in Lua); the "Mod Options" section lists groups from the user's ModOptions.ini (preselected when the group id matches an enabled mod id), `BuildOptions.ModOptions` = chosen groups, `modoptions.Extract` without key bindings (personal), Steam-ID check.
 - Labels: the in-game Mod Options screen stays the place to edit them; static reading of mods' Lua finds only ~16% of declarations (most mods build options in loops), so the launcher has no Mod Options editor (user chose option 2 on 2026-11-21).
 - `internal/kvfile` is also what the Mod settings editor (modsettings.go) uses now (one parser).
-Mod settings button (Lua mods details, Java mods rows): files detected for that mod; key=value files edit as label/entry rows grouped by [section] (`applyKV` rewrites only changed values, keeps comments/spacing/CRLF), other files as plain text; refuses while the game runs; backup `<file>.bak-<stamp>` before saving.
+Mod settings button (Lua mods details, Java mods rows): files detected for that mod; key=value files edit as label/entry rows grouped by [section] (`kvfile.Apply` rewrites only changed values, keeps comments/spacing/CRLF), other files as plain text; refuses while the game runs; backup `<file>.bak-<stamp>` before saving.
 
 ## music (2026-11-19)
 
