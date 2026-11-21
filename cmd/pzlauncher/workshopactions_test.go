@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"fyne.io/fyne/v2"
@@ -265,6 +266,87 @@ func TestActionsOnEveryKindOfRow(t *testing.T) {
 		}
 		if !a.reacts.Visible() || len(a.reacts.Objects) != 2 {
 			t.Errorf("%s: reactions line %v with %d parts", it.Title, a.reacts.Visible(), len(a.reacts.Objects))
+		}
+	}
+}
+
+func TestExpandedRowHeight(t *testing.T) {
+	test.NewTempApp(t)
+	m := newRowMeasure()
+	short := "1.2 MB  ·  updated 2026-11-18\n\nOne line.\n\nWorkshop item 1"
+	medium := short + "\n\n" + strings.Repeat("A medium description sentence that wraps. ", 12)
+	long := short + "\n\n" + strings.Repeat("A very long description line that goes on and on. ", 200)
+	hs, hm, hl := m.expandedH(short, false, 900), m.expandedH(medium, false, 900), m.expandedH(long, false, 900)
+	if !(hs < hm && hm < hl) {
+		t.Fatalf("heights short %v medium %v long %v", hs, hm, hl)
+	}
+	if hl-m.expandedH("", false, 900) > wsDetailsMaxH+m.textH("", 900)+1 {
+		t.Errorf("long text not capped: %v", hl)
+	}
+	if hs > m.collapsedH+m.barH+5*m.textH("x", 900) {
+		t.Errorf("short description still leaves a big gap: %v", hs)
+	}
+	if narrow := m.expandedH(medium, false, 450); narrow <= hm {
+		t.Errorf("narrower rows must wrap taller: %v <= %v", narrow, hm)
+	}
+	if with := m.expandedH(short, true, 900); with <= hs {
+		t.Errorf("a reactions line must add height: %v <= %v", with, hs)
+	}
+}
+
+func TestExpandedRowsFitTheirText(t *testing.T) {
+	test.NewTempApp(t)
+	w := test.NewWindow(nil)
+	defer w.Close()
+	b := &wsBrowser{u: &ui{win: w, ctx: context.Background()}, deps: wsDeps{}, busy: map[string]bool{}, subState: map[string]bool{}, status: newAutoLabel()}
+	b.sess = newWSSession(b)
+	items := []wsItem{
+		{ID: "1", Title: "Short", Desc: "One line."},
+		{ID: "2", Title: "Long", Desc: strings.Repeat("A long description that keeps going. ", 40)},
+	}
+	list := b.itemList(&items, nil)
+	w.SetContent(list)
+	w.Resize(fyne.NewSize(900, 1600))
+	rows := map[string]*wsRow{}
+	find := func() {
+		var walk func(o fyne.CanvasObject)
+		walk = func(o fyne.CanvasObject) {
+			if r, ok := o.(*wsRow); ok {
+				rows[r.title.Text] = r
+				return
+			}
+			switch v := o.(type) {
+			case *fyne.Container:
+				for _, k := range v.Objects {
+					walk(k)
+				}
+			case fyne.Widget:
+				for _, k := range test.WidgetRenderer(v).Objects() {
+					walk(k)
+				}
+			}
+		}
+		walk(list)
+	}
+	find()
+	test.Tap(rows["Short"].toggle)
+	find()
+	test.Tap(rows["Long"].toggle)
+	find()
+	hs, hl := rows["Short"].Size().Height, rows["Long"].Size().Height
+	m := newRowMeasure()
+	if hs <= m.collapsedH || hl <= hs {
+		t.Fatalf("open rows: short %v, long %v (collapsed %v)", hs, hl, m.collapsedH)
+	}
+	// the text area shows all of the short text, and the long text up to the cap
+	for _, name := range []string{"Short", "Long"} {
+		r := rows[name]
+		need := min(r.details.MinSize().Height, wsDetailsMaxH)
+		if got := r.detScroll.Size().Height; got < need-1 {
+			t.Errorf("%s: text area %v px, text needs %v", name, got, need)
+		}
+		if gap := r.detScroll.Size().Height - need; gap > 20 {
+			t.Errorf("%s: %v px empty under the text", name, gap)
 		}
 	}
 }

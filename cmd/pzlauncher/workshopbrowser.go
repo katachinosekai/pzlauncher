@@ -298,12 +298,14 @@ type wsRow struct {
 	ext         *widget.Button
 	toggle      *widget.Button
 	details     *widget.Label
+	detScroll   *container.Scroll
 	actions     *actionBar
 	detBox      fyne.CanvasObject
 	body        *fyne.Container
 	text        *fyne.Container
 	preview     string
 	content     fyne.CanvasObject
+	onWidth     func(w float32) // set by the list: re-measure open rows
 }
 
 // wsTitleMinW is the narrowest the title gets before the info side gives way.
@@ -480,7 +482,9 @@ func (r *wsRow) setCols(cols []string, collection bool) {
 	r.text.Refresh()
 }
 
-const wsDetailsH = 230
+// wsDetailsMaxH caps the details text in an expanded row; longer text scrolls
+// inside the row. Shorter text gets just the height it needs.
+const wsDetailsMaxH = 320
 
 // wsBtnSize fits the widest text the row's main button shows.
 func wsBtnSize() fyne.Size {
@@ -578,17 +582,90 @@ func newWSRow() *wsRow {
 	r.inner = inner
 	r.card = newTapCard(container.NewStack(bg, inner))
 	detScroll := container.NewVScroll(r.details)
-	detScroll.SetMinSize(fyne.NewSize(0, wsDetailsH))
+	r.detScroll = detScroll
+	detScroll.SetMinSize(fyne.NewSize(0, 1))
 	r.actions = newActionBar()
 	r.detBox = container.New(layout.NewCustomPaddedLayout(0, 0, 16, 0), container.NewBorder(r.actions.box, nil, nil, nil, detScroll))
 	r.detBox.Hide()
-	r.body = container.NewVBox(r.card, r.detBox)
+	// the details box takes the rest of the row's height (the list sizes open
+	// rows to their text, see rowMeasure); closed rows stay as tall as the card
+	r.body = container.New(rowBodyLayout{}, r.card, r.detBox)
 	r.content = container.New(layout.NewCustomPaddedLayout(3, 3, 0, 0), r.body)
 	r.ExtendBaseWidget(r)
 	return r
 }
 
 func (r *wsRow) CreateRenderer() fyne.WidgetRenderer { return widget.NewSimpleRenderer(r.content) }
+
+// Resize tells the list when its rows change width (window resized), so open
+// rows can be re-measured: text wraps to more or fewer lines.
+func (r *wsRow) Resize(s fyne.Size) {
+	if r.onWidth != nil && s.Width != r.Size().Width {
+		r.onWidth(s.Width)
+	}
+	r.BaseWidget.Resize(s)
+}
+
+// rowBodyLayout: the card at its own height on top; when shown, the details
+// box below it (after the padding) fills the rest.
+type rowBodyLayout struct{}
+
+func (rowBodyLayout) Layout(objs []fyne.CanvasObject, size fyne.Size) {
+	card, det := objs[0], objs[1]
+	ch := card.MinSize().Height
+	card.Move(fyne.NewPos(0, 0))
+	card.Resize(fyne.NewSize(size.Width, ch))
+	if det.Visible() {
+		y := ch + theme.Padding()
+		det.Move(fyne.NewPos(0, y))
+		det.Resize(fyne.NewSize(size.Width, max(size.Height-y, 0)))
+	}
+}
+
+func (rowBodyLayout) MinSize(objs []fyne.CanvasObject) fyne.Size {
+	s := objs[0].MinSize()
+	if objs[1].Visible() {
+		d := objs[1].MinSize()
+		s = fyne.NewSize(max(s.Width, d.Width), s.Height+theme.Padding()+d.Height)
+	}
+	return s
+}
+
+// rowMeasure works out the height of an expanded row from what it shows.
+type rowMeasure struct {
+	collapsedH, barH, reactH float32
+	probe                    *widget.Label
+}
+
+func newRowMeasure() *rowMeasure {
+	m := &rowMeasure{collapsedH: newWSRow().MinSize().Height, probe: widget.NewLabel("")}
+	m.probe.Wrapping = fyne.TextWrapWord
+	a := newActionBar()
+	m.barH = a.box.Objects[0].MinSize().Height
+	img := canvas.NewRectangle(color.Transparent)
+	img.SetMinSize(fyne.NewSize(22, 22))
+	m.reactH = container.NewHBox(container.NewCenter(img), widget.NewLabel("9")).MinSize().Height
+	return m
+}
+
+// textH is the details text height wrapped at width w, capped at wsDetailsMaxH.
+func (m *rowMeasure) textH(text string, w float32) float32 {
+	m.probe.SetText(text)
+	m.probe.Resize(fyne.NewSize(max(w, 50), 1))
+	return min(m.probe.MinSize().Height, wsDetailsMaxH)
+}
+
+// expandedH: the row, then (padding) the action buttons, the reactions line if
+// any, and the details text, each separated by the box padding.
+func (m *rowMeasure) expandedH(text string, reactions bool, rowW float32) float32 {
+	pad := theme.Padding()
+	h := m.collapsedH + pad + m.barH
+	if reactions {
+		h += pad + m.reactH
+	}
+	const detIndent = 16 // the details box's left inset (newWSRow)
+	return h + pad + m.textH(text, rowW-detIndent) + 2
+}
 
 func wsDotColor(busy, subscribed, installed bool) color.Color {
 	switch {
@@ -679,13 +756,19 @@ func (b *wsBrowser) itemList(items *[]wsItem, nearEnd func()) *widget.List {
 	var list *widget.List
 	expanded := map[string]bool{}
 	heights := map[int]float32{}
-	collapsedH := newWSRow().MinSize().Height
-	expandedH := collapsedH + wsDetailsH + theme.Padding()
+	m := newRowMeasure()
+	collapsedH := m.collapsedH
+	rowW := float32(0) // last row width seen
+	refitting := false
 	fix := func() {
+		w := rowW
+		if w == 0 {
+			w = list.Size().Width
+		}
 		for i, it := range *items {
 			want := collapsedH
 			if expanded[it.ID] {
-				want = expandedH
+				want = m.expandedH(wsDetailsText(it, b.active), len(b.state(it.ID).reacts) > 0, w)
 			}
 			if h, ok := heights[i]; ok && h == want || !ok && want == collapsedH {
 				continue
@@ -712,6 +795,16 @@ func (b *wsBrowser) itemList(items *[]wsItem, nearEnd func()) *widget.List {
 			}
 			it := (*items)[i]
 			r := o.(*wsRow)
+			r.onWidth = func(w float32) {
+				if w == rowW || w <= 0 {
+					return
+				}
+				rowW = w
+				if len(expanded) > 0 && !refitting {
+					refitting = true
+					go fyne.Do(func() { refitting = false; fix() })
+				}
+			}
 			r.title.SetText(it.displayTitle())
 			info := it.Info
 			if it.State != "" {
