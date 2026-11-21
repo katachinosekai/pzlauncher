@@ -340,7 +340,7 @@ var (
 	wsCollCols = [4][]string{{"B41/B42"}, {"★ 5/5"}, {"9999 items"}, {"12 months ago", "10 years ago"}}
 )
 
-// wsColsLayout places the 4 column labels right-aligned in fixed widths:
+// wsColsLayout places the 4 column labels in fixed widths (text centered in each cell):
 // mods = build | subs | rating | age, collections = build | rating | items | age.
 // The build column (index 0) is hidden when the row is too narrow.
 type wsColsLayout struct {
@@ -549,7 +549,7 @@ func newWSRow() *wsRow {
 	for i := range r.cols {
 		c := widget.NewLabel("")
 		c.Truncation = fyne.TextTruncateEllipsis
-		c.Alignment = fyne.TextAlignTrailing
+		c.Alignment = fyne.TextAlignCenter
 		c.Importance = widget.LowImportance
 		r.cols[i], colObjs[i] = c, c
 	}

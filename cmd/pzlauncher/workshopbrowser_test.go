@@ -458,6 +458,10 @@ func TestHeaderAlignsWithRows(t *testing.T) {
 				if hx != ax || ax != bx || h.cols[i].Size().Width != a.cols[i].Size().Width {
 					t.Errorf("coll=%v width %v column %d: header x %v, rows x %v / %v", coll, w, i, hx, ax, bx)
 				}
+				// same cell box + centered text = heading over the middle of its values
+				if h.cols[i].Alignment != fyne.TextAlignCenter || a.cols[i].Alignment != fyne.TextAlignCenter {
+					t.Errorf("column %d: alignment header %v row %v, want centered", i, h.cols[i].Alignment, a.cols[i].Alignment)
+				}
 				if h.cols[i].Visible() != a.cols[i].Visible() {
 					t.Errorf("coll=%v width %v column %d: header visible %v, row %v", coll, w, i, h.cols[i].Visible(), a.cols[i].Visible())
 				}
