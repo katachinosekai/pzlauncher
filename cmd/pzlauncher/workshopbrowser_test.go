@@ -469,6 +469,9 @@ func TestHeaderAlignsWithRows(t *testing.T) {
 		if h.MinSize().Height >= a.MinSize().Height {
 			t.Errorf("header (%v) not slimmer than a row (%v)", h.MinSize().Height, a.MinSize().Height)
 		}
+		if lh := h.title.MinSize().Height; h.MinSize().Height > lh+0.5 {
+			t.Errorf("header %v taller than its label %v: card padding left above/below", h.MinSize().Height, lh)
+		}
 	}
 }
 

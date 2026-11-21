@@ -279,6 +279,7 @@ type wsRow struct {
 	widget.BaseWidget
 	bg, thumbBg *canvas.Rectangle
 	rightBox    *fyne.Container
+	inner       *fyne.Container // the card's padded content
 	card        *tapCard
 	img         *canvas.Image
 	title       *widget.Label
@@ -498,6 +499,9 @@ func newWSHeader(collection bool) *wsRow {
 	pad.SetMinSize(fyne.NewSize(rs.Width, 0))
 	h.rightBox.Objects = []fyne.CanvasObject{pad}
 	h.dot.FillColor = color.Transparent
+	// no card padding above/below (sides unchanged, so the headings stay aligned)
+	h.inner.Layout = layout.NewCustomPaddedLayout(0, 0, 4, 4)
+	h.content.(*fyne.Container).Layout = layout.NewCustomPaddedLayout(0, 0, 0, 0)
 	h.title.TextStyle = fyne.TextStyle{Bold: true}
 	h.title.Importance = widget.LowImportance
 	h.title.SetText("Name")
@@ -564,6 +568,7 @@ func newWSRow() *wsRow {
 	r.rightBox = container.NewHBox(container.NewGridWrap(wsBtnSize(), r.btn), r.ext, r.toggle)
 	right := container.NewCenter(r.rightBox)
 	inner := container.New(layout.NewCustomPaddedLayout(4, 4, 4, 4), container.NewBorder(nil, nil, container.NewStack(thumbBg, r.img), right, r.text))
+	r.inner = inner
 	r.card = newTapCard(container.NewStack(bg, inner))
 	detScroll := container.NewVScroll(r.details)
 	detScroll.SetMinSize(fyne.NewSize(0, wsDetailsH))
@@ -1011,7 +1016,10 @@ func (l *browseLayout) Layout(objs []fyne.CanvasObject, size fyne.Size) {
 		sh := status.MinSize().Height
 		status.Move(fyne.NewPos(0, y))
 		status.Resize(fyne.NewSize(size.Width, sh))
-		y += sh + pad
+		y += sh
+		if !header.Visible() {
+			y += pad
+		}
 	}
 	if header.Visible() {
 		hh := header.MinSize().Height
