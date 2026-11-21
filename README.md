@@ -71,7 +71,7 @@ Release builds: `scripts/release.sh <version>` (uses [fyne-cross](https://github
 
 ## Credits
 
-Project Zomboid is made by The Indie Stone. ZombieBuddy is by zed-0xff. Mods belong to their authors. The raccoon icon is original artwork for this project (`assets/icon.svg`).
+Project Zomboid is made by The Indie Stone. ZombieBuddy is by zed-0xff. Mods belong to their authors. The raccoon icon is original pixel art for this project (`assets/icon-64.png`).
 
 ## License
 
