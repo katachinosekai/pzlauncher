@@ -11,6 +11,8 @@ import (
 	"image/png"
 	"os"
 	"path/filepath"
+	"reflect"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -74,7 +76,7 @@ func TestProtocol(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []Command{{Op: OpSignIn, Mode: ModeQR}, {Op: OpSubscribe, ID: "123", Req: 4, Unsubscribe: true, Deps: true}, {Op: OpState}, {Op: OpCancelSignIn}, {Op: OpSignOut}, {Op: OpQuit}}
-	if !slices.Equal(got, want) {
+	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("%+v", got)
 	}
 	var ev bytes.Buffer
@@ -286,50 +288,68 @@ func TestHelperSubscribe(t *testing.T) {
 	}
 }
 
-func TestVoteProtocol(t *testing.T) {
+func TestItemProtocol(t *testing.T) {
+	ok := []CollChange{{ID: "5", Title: "My Pack", Add: true}}
 	for _, c := range []struct {
 		cmd  Command
 		want bool
 	}{
-		{Command{Op: OpVote, ID: "12"}, true},
-		{Command{Op: OpVote, ID: "12", Vote: VoteUp}, true},
-		{Command{Op: OpVote, ID: "12", Vote: VoteDown}, true},
-		{Command{Op: OpVote, ID: "12", Vote: VoteNone}, false}, // "none" is a result, not a command
-		{Command{Op: OpVote, ID: "12", Vote: "sideways"}, false},
-		{Command{Op: OpVote, ID: "1;2", Vote: VoteUp}, false},
+		{Command{Op: OpItem, ID: "12", Action: ActRead}, true},
+		{Command{Op: OpItem, ID: "12", Action: ActVoteUp}, true},
+		{Command{Op: OpItem, ID: "12", Action: ActVoteDown}, true},
+		{Command{Op: OpItem, ID: "12", Action: ActFav}, true},
+		{Command{Op: OpItem, ID: "12", Action: ActUnfav}, true},
+		{Command{Op: OpItem, ID: "12", Action: ActColls}, true},
+		{Command{Op: OpItem, ID: "12", Action: ActAward}, true},
+		{Command{Op: OpItem, ID: "12", Action: ActSetColls, Colls: ok}, true},
+		{Command{Op: OpItem, ID: "12", Action: ActSetColls}, false},                                   // nothing to change
+		{Command{Op: OpItem, ID: "12", Action: ActSetColls, Colls: []CollChange{{ID: "5;x"}}}, false}, // bad id
+		{Command{Op: OpItem, ID: "12", Action: ActRead, Colls: ok}, false},                            // colls only for setcollections
+		{Command{Op: OpItem, ID: "12", Action: "delete"}, false},
+		{Command{Op: OpItem, ID: "1;2", Action: ActRead}, false},
 	} {
 		if got := c.cmd.Valid(); got != c.want {
 			t.Errorf("%+v valid=%v want %v", c.cmd, got, c.want)
 		}
 	}
-	m, ok := ParseScriptMessage(`{"kind":"result","id":"9","result":"done","vote":"down"}`)
-	if !ok || m.Vote != VoteDown {
+	m, ok2 := ParseScriptMessage(`{"kind":"result","id":"9","result":"done","vote":"down","fav":"yes","colls":[{"id":"7","title":"  My\nPack ","in":true},{"id":"x","title":"bad"}]}`)
+	if !ok2 || m.Vote != VoteDown || m.Fav != FavYes || len(m.Colls) != 1 || m.Colls[0].Title != "My Pack" || !m.Colls[0].In {
 		t.Fatalf("%+v", m)
 	}
-	if _, ok := ParseScriptMessage(`{"kind":"result","id":"9","result":"done","vote":"maybe"}`); ok {
-		t.Fatal("unknown vote value accepted")
-	}
-	for _, want := range []string{"", VoteUp, VoteDown} {
-		js := VoteScript("12", want, "p")
-		if strings.Count(js, "(") != strings.Count(js, ")") || strings.Count(js, "{") != strings.Count(js, "}") {
-			t.Fatalf("unbalanced script: %s", js)
+	for _, bad := range []string{`{"kind":"result","id":"9","result":"done","vote":"maybe"}`, `{"kind":"result","id":"9","result":"done","fav":"sure"}`} {
+		if _, ok := ParseScriptMessage(bad); ok {
+			t.Error(bad)
 		}
-		if !strings.Contains(js, `"want":"`+want+`"`) || !strings.Contains(js, "VoteUpBtn") || !strings.Contains(js, "VoteDownBtn") {
-			t.Fatalf("script for %q: %s", want, js)
+	}
+	for _, act := range []string{ActRead, ActVoteUp, ActVoteDown, ActFav, ActUnfav, ActColls, ActSetColls, ActAward} {
+		js := ItemScript("12", act, ok, "p")
+		// the award regex has escaped brackets; leave it out of the count
+		bare := regexp.MustCompile(`/PublishedFileAward\\\(.*?/\.exec`).ReplaceAllString(js, "RE.exec")
+		if strings.Count(bare, "(") != strings.Count(bare, ")") || strings.Count(bare, "{") != strings.Count(bare, "}") || strings.Count(bare, "[") != strings.Count(bare, "]") {
+			t.Fatalf("unbalanced script for %s: %s", act, js)
+		}
+		if !strings.Contains(js, `"act":"`+act+`"`) {
+			t.Fatalf("script for %s: %s", act, js)
+		}
+	}
+	js := ItemScript("12", ActRead, nil, "p")
+	for _, want := range []string{"VoteUpBtn", "VoteDownBtn", "FavoriteItemBtn", "toggled", "ajaxgetmycollections", "ajaxaddtocollections", "PublishedFileAward", `"colls":[]`} {
+		if !strings.Contains(js, want) {
+			t.Errorf("script lacks %s", want)
 		}
 	}
 }
 
-func TestHelperVote(t *testing.T) {
+func TestHelperItem(t *testing.T) {
 	var out bytes.Buffer
 	h := NewHelper(&out, nil)
 	h.afterFunc = func(time.Duration, func()) func() { return func() {} }
 	e := &fakeEngine{}
 	h.Start(e)
 	e.take()
-	// a read, a vote and a subscribe share the one job queue
-	h.Apply(Command{Op: OpVote, ID: "1", Req: 1})
-	h.Apply(Command{Op: OpVote, ID: "2", Req: 2, Vote: VoteUp})
+	// item actions and a subscribe share the one job queue
+	h.Apply(Command{Op: OpItem, ID: "1", Req: 1, Action: ActRead})
+	h.Apply(Command{Op: OpItem, ID: "2", Req: 2, Action: ActColls})
 	h.Apply(Command{Op: OpSubscribe, ID: "3", Req: 3})
 	if l := e.take(); !slices.Equal(l, []string{"load " + ItemURL("1")}) {
 		t.Fatal(l)
@@ -338,10 +358,10 @@ func TestHelperVote(t *testing.T) {
 	if l := e.take(); len(l) != 1 || !strings.HasPrefix(l[0], "eval (function(a){func") {
 		t.Fatal(l)
 	}
-	h.ScriptMessage(`{"kind":"result","id":"1","result":"done","vote":"none"}`)
+	h.ScriptMessage(`{"kind":"result","id":"1","result":"done","vote":"none","fav":"yes"}`)
 	h.ScriptMessage(page(true, "user", "2"))
 	e.take()
-	h.ScriptMessage(`{"kind":"result","id":"2","result":"done","vote":"up"}`)
+	h.ScriptMessage(`{"kind":"result","id":"2","result":"done","vote":"up","fav":"no","colls":[{"id":"8","title":"Pack","in":true}]}`)
 	h.ScriptMessage(page(true, "user", "3"))
 	e.take()
 	h.ScriptMessage(`{"kind":"result","id":"3","result":"done"}`)
@@ -350,17 +370,49 @@ func TestHelperVote(t *testing.T) {
 		if ev.Event == EvSession {
 			continue
 		}
-		got = append(got, fmt.Sprintf("%s %d %s %s", ev.Event, ev.Req, ev.Result, ev.Vote))
+		got = append(got, fmt.Sprintf("%s %d %s %s %s %d", ev.Event, ev.Req, ev.Result, ev.Vote, ev.Fav, len(ev.Colls)))
 	}
-	want := []string{"voteresult 1 done none", "voteresult 2 done up", "subresult 3 done "}
+	want := []string{"itemresult 1 done none yes 0", "itemresult 2 done up no 1", "subresult 3 done   0"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("got %q want %q", got, want)
 	}
-	// signed out while voting: the result says so and the session flips
-	h.Apply(Command{Op: OpVote, ID: "4", Req: 4, Vote: VoteDown})
-	h.ScriptMessage(`{"kind":"result","id":"4","result":"not_signed_in"}`)
+
+	// award: the window shows Steam's award picker and other jobs wait until it closes
+	h.Apply(Command{Op: OpItem, ID: "4", Req: 4, Action: ActAward})
+	h.Apply(Command{Op: OpItem, ID: "5", Req: 5, Action: ActRead})
+	e.take()
+	h.ScriptMessage(page(true, "user", "4"))
+	if l := e.take(); len(l) != 2 || l[0] != "show" || !strings.HasPrefix(l[1], "eval ") {
+		t.Fatalf("award must show the window: %q", l)
+	}
+	h.ScriptMessage(`{"kind":"result","id":"4","result":"done","vote":"up","fav":"no"}`)
+	if l := e.take(); len(l) != 0 {
+		t.Fatalf("next job must wait while the award window is up: %q", l)
+	}
+	h.WindowClosed()
 	evs := events(&out)
-	if len(evs) != 2 || evs[0].Event != EvVoteResult || evs[0].Result != ResultNotSignedIn || evs[1].Event != EvSession || evs[1].SignedIn {
+	if len(evs) != 2 || evs[0].Event != EvItemResult || evs[0].Req != 4 || evs[1].Event != EvAwardClosed || evs[1].ID != "4" {
+		t.Fatalf("%+v", evs)
+	}
+	if l := e.take(); !slices.Equal(l, []string{"hide", "load " + StatusURL, "load " + ItemURL("5")}) {
+		t.Fatalf("after closing: %q", l)
+	}
+	// a failed award hides the window again and does not block the queue
+	h.ScriptMessage(page(true, "user", "5"))
+	h.ScriptMessage(`{"kind":"result","id":"5","result":"done"}`)
+	h.Apply(Command{Op: OpItem, ID: "6", Req: 6, Action: ActAward})
+	h.ScriptMessage(page(true, "user", "6"))
+	e.take()
+	h.ScriptMessage(`{"kind":"result","id":"6","result":"failed","error":"Steam shows no Award button for this item"}`)
+	if l := e.take(); !slices.Equal(l, []string{"hide"}) {
+		t.Fatalf("failed award: %q", l)
+	}
+	// signed out while acting: the result says so and the session flips
+	events(&out)
+	h.Apply(Command{Op: OpItem, ID: "7", Req: 7, Action: ActVoteDown})
+	h.ScriptMessage(`{"kind":"result","id":"7","result":"not_signed_in"}`)
+	evs = events(&out)
+	if len(evs) != 2 || evs[0].Event != EvItemResult || evs[0].Result != ResultNotSignedIn || evs[1].Event != EvSession || evs[1].SignedIn {
 		t.Fatalf("%+v", evs)
 	}
 }

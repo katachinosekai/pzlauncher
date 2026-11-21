@@ -37,15 +37,16 @@ func init() {
 }
 
 type wsDeps struct {
-	browse   func(ctx context.Context, q workshop.BrowseQuery) (*workshop.BrowseResult, error)
-	details  func(ctx context.Context, ids []string) (map[string]workshop.Details, error)
-	subs     func() ([]workshop.Sub, error)
-	check    func(ctx context.Context, cid string) (*workshop.Result, error)
-	thumb    func(ctx context.Context, u string) ([]byte, error)
-	local    func(itemDir string) workshop.LocalItem
-	uploads  func() map[string]string
-	active   func() map[string]bool
-	external func(u string) error
+	browse    func(ctx context.Context, q workshop.BrowseQuery) (*workshop.BrowseResult, error)
+	details   func(ctx context.Context, ids []string) (map[string]workshop.Details, error)
+	subs      func() ([]workshop.Sub, error)
+	check     func(ctx context.Context, cid string) (*workshop.Result, error)
+	thumb     func(ctx context.Context, u string) ([]byte, error)
+	local     func(itemDir string) workshop.LocalItem
+	uploads   func() map[string]string
+	active    func() map[string]bool
+	external  func(u string) error
+	reactions func(ctx context.Context, id string) ([]workshop.Reaction, error)
 }
 
 var workshopDeps = wsDeps{
@@ -83,6 +84,9 @@ var workshopDeps = wsDeps{
 		return workshop.Check(ctx, workshop.Options{CollectionID: cid})
 	},
 	external: func(u string) error { return install.DefaultSystem().OpenURL(u) },
+	reactions: func(ctx context.Context, id string) ([]workshop.Reaction, error) {
+		return workshop.Reactions(ctx, nil, id)
+	},
 }
 
 type wsItem struct {
@@ -125,15 +129,13 @@ type wsBrowser struct {
 	status         *autoLabel
 	sess           *wsSession
 
-	busy     map[string]bool
-	subState map[string]bool
-	votes    map[string]string // Steam vote per mod: up / down / none ("" = not read yet)
-	voteBusy map[string]bool
-	voteErr  map[string]string
-	voteSend func(id, want string, cb func(webview.Event)) // tests; nil = the Steam session
-	watchers []func()
-	active   map[string]bool
-	fixes    map[*widget.List]func()
+	busy       map[string]bool
+	subState   map[string]bool
+	itemStates map[string]*itemState                                                    // vote / favorite / reactions per item (workshopactions.go)
+	itemSend   func(id, act string, colls []webview.CollChange, cb func(webview.Event)) // tests; nil = the Steam session
+	watchers   []func()
+	active     map[string]bool
+	fixes      map[*widget.List]func()
 }
 
 func (b *wsBrowser) refreshList(l *widget.List) {
@@ -296,7 +298,7 @@ type wsRow struct {
 	ext         *widget.Button
 	toggle      *widget.Button
 	details     *widget.Label
-	vote        *voteBar
+	actions     *actionBar
 	detBox      fyne.CanvasObject
 	body        *fyne.Container
 	text        *fyne.Container
@@ -478,7 +480,7 @@ func (r *wsRow) setCols(cols []string, collection bool) {
 	r.text.Refresh()
 }
 
-const wsDetailsH = 170
+const wsDetailsH = 230
 
 // wsBtnSize fits the widest text the row's main button shows.
 func wsBtnSize() fyne.Size {
@@ -577,8 +579,8 @@ func newWSRow() *wsRow {
 	r.card = newTapCard(container.NewStack(bg, inner))
 	detScroll := container.NewVScroll(r.details)
 	detScroll.SetMinSize(fyne.NewSize(0, wsDetailsH))
-	r.vote = newVoteBar()
-	r.detBox = container.New(layout.NewCustomPaddedLayout(0, 0, 16, 0), container.NewBorder(r.vote.box, nil, nil, nil, detScroll))
+	r.actions = newActionBar()
+	r.detBox = container.New(layout.NewCustomPaddedLayout(0, 0, 16, 0), container.NewBorder(r.actions.box, nil, nil, nil, detScroll))
 	r.detBox.Hide()
 	r.body = container.NewVBox(r.card, r.detBox)
 	r.content = container.New(layout.NewCustomPaddedLayout(3, 3, 0, 0), r.body)
@@ -733,11 +735,18 @@ func (b *wsBrowser) itemList(items *[]wsItem, nearEnd func()) *widget.List {
 			if open {
 				r.toggle.SetIcon(theme.MenuDropUpIcon())
 				r.details.SetText(wsDetailsText(it, b.active))
-				// thumbs up / down on every tab (mods and collections)
+				// Steam-style actions on every tab (mods and collections)
 				id, title := it.ID, it.displayTitle()
-				r.vote.show(b.voteFor(id),
-					func() { b.castVote(id, webview.VoteUp, title) },
-					func() { b.castVote(id, webview.VoteDown, title) })
+				ui, reacts := b.actionsFor(id)
+				r.actions.show(ui, actionCalls{
+					up:      func() { b.vote(id, webview.ActVoteUp, title) },
+					down:    func() { b.vote(id, webview.ActVoteDown, title) },
+					fav:     func() { b.toggleFav(id, title) },
+					award:   func() { b.award(id, title) },
+					share:   func() { b.share(id, title) },
+					addColl: func() { b.addToCollection(id, title) },
+				})
+				r.actions.showReactions(reacts, b.reactionIcon)
 				r.detBox.Show()
 			} else {
 				r.toggle.SetIcon(theme.MenuDropDownIcon())

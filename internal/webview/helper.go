@@ -66,6 +66,7 @@ type Helper struct {
 	lastQR    string
 	lastChal  string
 	clearing  bool
+	showing   string // item id whose Steam award window is shown (jobs wait)
 }
 
 func NewHelper(out io.Writer, open func(string) error) *Helper {
@@ -131,7 +132,7 @@ func (h *Helper) Apply(c Command) {
 		} else {
 			h.emitSession()
 		}
-	case OpSubscribe, OpVote:
+	case OpSubscribe, OpItem:
 		h.jobs = append(h.jobs, c)
 		h.next()
 	case OpQuit:
@@ -147,7 +148,7 @@ func (h *Helper) emitSession() {
 }
 
 func (h *Helper) next() {
-	if h.cur != nil || h.sign != signNone || h.clearing || len(h.jobs) == 0 {
+	if h.cur != nil || h.sign != signNone || h.clearing || h.showing != "" || len(h.jobs) == 0 {
 		return
 	}
 	c := h.jobs[0]
@@ -158,7 +159,7 @@ func (h *Helper) next() {
 	h.stopTimer = h.afterFunc(h.timeout, func() {
 		h.eng.Post(func() {
 			if h.cur != nil && h.gen == gen {
-				h.finish(ResultFailed, "Steam did not answer in time", "")
+				h.finish(ResultFailed, "Steam did not answer in time", nil)
 			}
 		})
 	})
@@ -172,18 +173,27 @@ func (h *Helper) stop() {
 	}
 }
 
-func (h *Helper) finish(result, errText, vote string) {
+func (h *Helper) finish(result, errText string, m *ScriptMsg) {
 	c := h.cur
 	if c == nil {
 		return
 	}
 	h.stop()
 	h.cur = nil
-	ev := EvSubResult
-	if c.Op == OpVote {
-		ev = EvVoteResult
+	e := Event{Event: EvSubResult, ID: c.ID, Req: c.Req, Result: result, Error: errText}
+	if c.Op == OpItem {
+		e.Event = EvItemResult
+		if m != nil {
+			e.Vote, e.Fav, e.Colls = m.Vote, m.Fav, m.Colls
+		}
+		if c.Action == ActAward && result == ResultDone {
+			// Steam's award window stays up until the user closes it
+			h.showing = c.ID
+		} else if c.Action == ActAward {
+			h.eng.Hide()
+		}
 	}
-	h.Emit(Event{Event: ev, ID: c.ID, Req: c.Req, Result: result, Error: errText, Vote: vote})
+	h.Emit(e)
 	if result == ResultNotSignedIn && (h.signedIn || !h.known) {
 		h.known, h.signedIn, h.name = true, false, ""
 		h.emitSession()
@@ -203,6 +213,14 @@ func (h *Helper) requeueCurrent() {
 
 func (h *Helper) WindowClosed() {
 	h.eng.Hide()
+	if h.showing != "" {
+		id := h.showing
+		h.showing = ""
+		h.Emit(Event{Event: EvAwardClosed, ID: id})
+		h.eng.Load(StatusURL)
+		h.next()
+		return
+	}
 	if h.sign == signNone {
 		return
 	}
@@ -238,7 +256,7 @@ func (h *Helper) ScriptMessage(s string) {
 		}
 	case MsgResult:
 		if h.cur != nil && h.cur.ID == m.ID {
-			h.finish(m.Result, m.Error, m.Vote)
+			h.finish(m.Result, m.Error, &m)
 		}
 	}
 }
@@ -263,8 +281,11 @@ func (h *Helper) page(m ScriptMsg) {
 		h.emitSession()
 	}
 	if h.sign == signNone && h.cur != nil && m.ItemID == h.cur.ID {
-		if h.cur.Op == OpVote {
-			h.eng.Eval(VoteScript(h.cur.ID, h.cur.Vote, h.PostJS))
+		if h.cur.Op == OpItem {
+			if h.cur.Action == ActAward {
+				h.eng.Show()
+			}
+			h.eng.Eval(ItemScript(h.cur.ID, h.cur.Action, h.cur.Colls, h.PostJS))
 		} else {
 			h.eng.Eval(SubscribeScript(h.cur.ID, h.cur.Unsubscribe, h.cur.Deps, h.PostJS))
 		}

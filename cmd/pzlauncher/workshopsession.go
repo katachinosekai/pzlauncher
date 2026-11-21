@@ -22,7 +22,7 @@ const (
 type wsPending struct {
 	id    string
 	unsub bool
-	vote  bool // a vote read / cast, not a subscription change
+	item  bool // an item action (vote, favorite, collections, award), not a subscription change
 	cb    func(webview.Event)
 }
 
@@ -147,7 +147,9 @@ func (s *wsSession) onEvent(e webview.Event) {
 			return
 		}
 		p.cb(e)
-	case webview.EvVoteResult:
+	case webview.EvAwardClosed:
+		s.b.awardClosed(e.ID)
+	case webview.EvItemResult:
 		p, ok := s.reqs[e.Req]
 		if !ok {
 			return
@@ -161,21 +163,21 @@ func (s *wsSession) onEvent(e webview.Event) {
 	}
 }
 
-// vote reads (want "") or casts a thumbs up / down through the signed-in
-// hidden browser. Signed out or without the built-in browser it answers at
-// once; it never opens a sign-in by itself.
-func (s *wsSession) vote(id, want string, cb func(webview.Event)) {
+// item runs an item action (webview.Act*) through the signed-in hidden
+// browser. Signed out or without the built-in browser it answers at once; it
+// never opens a sign-in by itself.
+func (s *wsSession) item(id, act string, colls []webview.CollChange, cb func(webview.Event)) {
 	s.ensure()
 	if s.fallback || !s.known || !s.signedIn {
-		cb(webview.Event{Event: webview.EvVoteResult, ID: id, Result: webview.ResultNotSignedIn})
+		cb(webview.Event{Event: webview.EvItemResult, ID: id, Result: webview.ResultNotSignedIn})
 		return
 	}
 	s.nextReq++
 	req := s.nextReq
-	s.reqs[req] = wsPending{id: id, vote: true, cb: cb}
-	if !s.send(webview.Command{Op: webview.OpVote, ID: id, Req: req, Vote: want}) {
+	s.reqs[req] = wsPending{id: id, item: true, cb: cb}
+	if !s.send(webview.Command{Op: webview.OpItem, ID: id, Req: req, Action: act, Colls: colls}) {
 		delete(s.reqs, req)
-		cb(webview.Event{Event: webview.EvVoteResult, ID: id, Result: webview.ResultFailed, Error: "the built-in browser is unavailable"})
+		cb(webview.Event{Event: webview.EvItemResult, ID: id, Result: webview.ResultFailed, Error: "the built-in browser is unavailable"})
 	}
 }
 
@@ -190,8 +192,8 @@ func (s *wsSession) onFallback(err error) {
 	pend := s.reqs
 	s.reqs = map[int]wsPending{}
 	for _, p := range pend {
-		if p.vote {
-			p.cb(webview.Event{Event: webview.EvVoteResult, ID: p.id, Result: webview.ResultFailed, Error: "the built-in browser is unavailable"})
+		if p.item {
+			p.cb(webview.Event{Event: webview.EvItemResult, ID: p.id, Result: webview.ResultFailed, Error: "the built-in browser is unavailable"})
 			continue
 		}
 		s.openExternal(p)

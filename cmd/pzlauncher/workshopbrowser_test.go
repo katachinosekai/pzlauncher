@@ -80,6 +80,9 @@ func fakeWorkshopDeps() wsDeps {
 		},
 		active:   func() map[string]bool { return map[string]bool{"BetterSorting": true, "CommonSense": true} },
 		external: func(string) error { return errors.New("test: no browser") },
+		reactions: func(ctx context.Context, id string) ([]workshop.Reaction, error) {
+			return []workshop.Reaction{{ID: 34, Count: 2, Name: "Pure Gold"}, {ID: 7, Count: 15, Name: "Gotta Have It"}}, nil
+		},
 	}
 }
 

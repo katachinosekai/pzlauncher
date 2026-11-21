@@ -15,7 +15,7 @@ const (
 	OpSignOut      = "signout"
 	OpState        = "state"
 	OpSubscribe    = "subscribe"
-	OpVote         = "vote"
+	OpItem         = "item" // an action on one Workshop item's page (see Act*)
 	OpQuit         = "quit"
 )
 
@@ -32,16 +32,47 @@ const (
 	EvQR           = "qr"
 	EvSignInClosed = "signinclosed"
 	EvSubResult    = "subresult"
-	EvVoteResult   = "voteresult"
+	EvItemResult   = "itemresult"
+	EvAwardClosed  = "awardclosed" // the Steam award window was closed
 )
 
-// Steam Workshop votes (thumbs up / down). Steam has no "remove vote":
-// clicking the vote you already gave does nothing.
+// OpItem actions, done on the item's Steam page in the signed-in browser.
+const (
+	ActRead     = "read" // current vote + favorite
+	ActVoteUp   = "voteup"
+	ActVoteDown = "votedown"
+	ActFav      = "favorite"
+	ActUnfav    = "unfavorite"
+	ActColls    = "collections"    // list your collections, marking the ones holding the item
+	ActSetColls = "setcollections" // add to / remove from collections (Colls)
+	ActAward    = "award"          // show Steam's own award window for the item
+)
+
+// Item state in EvItemResult. Steam has no "remove vote": clicking the vote
+// already given does nothing.
 const (
 	VoteUp   = "up"
 	VoteDown = "down"
-	VoteNone = "none" // read result only: no vote given
+	VoteNone = "none"
+	FavYes   = "yes"
+	FavNo    = "no"
 )
+
+// CollChange adds the item to (Add) or removes it from one of your collections.
+type CollChange struct {
+	ID    string `json:"id"`
+	Title string `json:"title"`
+	Add   bool   `json:"add"`
+}
+
+// Coll is one of your collections; In = it already holds the item.
+type Coll struct {
+	ID    string `json:"id"`
+	Title string `json:"title"`
+	In    bool   `json:"in"`
+}
+
+const maxColls = 500
 
 const (
 	ResultDone        = "done"
@@ -60,13 +91,14 @@ func ItemURL(id string) string {
 }
 
 type Command struct {
-	Op          string `json:"op"`
-	Mode        string `json:"mode,omitempty"`
-	ID          string `json:"id,omitempty"`
-	Req         int    `json:"req,omitempty"`
-	Unsubscribe bool   `json:"unsubscribe,omitempty"`
-	Deps        bool   `json:"deps,omitempty"`
-	Vote        string `json:"vote,omitempty"` // OpVote: "up", "down", or "" to only read the current vote
+	Op          string       `json:"op"`
+	Mode        string       `json:"mode,omitempty"`
+	ID          string       `json:"id,omitempty"`
+	Req         int          `json:"req,omitempty"`
+	Unsubscribe bool         `json:"unsubscribe,omitempty"`
+	Deps        bool         `json:"deps,omitempty"`
+	Action      string       `json:"action,omitempty"` // OpItem
+	Colls       []CollChange `json:"colls,omitempty"`  // OpItem ActSetColls
 }
 
 type Event struct {
@@ -80,7 +112,9 @@ type Event struct {
 	Image     string `json:"image,omitempty"`
 	Challenge string `json:"challenge,omitempty"`
 	Error     string `json:"error,omitempty"`
-	Vote      string `json:"vote,omitempty"` // EvVoteResult: "up", "down" or "none"
+	Vote      string `json:"vote,omitempty"`  // EvItemResult: up / down / none ("" = page has no vote buttons)
+	Fav       string `json:"fav,omitempty"`   // EvItemResult: yes / no
+	Colls     []Coll `json:"colls,omitempty"` // EvItemResult for ActColls
 }
 
 const maxLine = 1 << 20
@@ -98,8 +132,24 @@ func (c Command) Valid() bool {
 		return c.Mode == ModeWindow || c.Mode == ModeQR
 	case OpSubscribe:
 		return digits.MatchString(c.ID)
-	case OpVote:
-		return digits.MatchString(c.ID) && (c.Vote == "" || c.Vote == VoteUp || c.Vote == VoteDown)
+	case OpItem:
+		if !digits.MatchString(c.ID) {
+			return false
+		}
+		switch c.Action {
+		case ActRead, ActVoteUp, ActVoteDown, ActFav, ActUnfav, ActColls, ActAward:
+			return len(c.Colls) == 0
+		case ActSetColls:
+			if len(c.Colls) == 0 || len(c.Colls) > maxColls {
+				return false
+			}
+			for _, x := range c.Colls {
+				if !digits.MatchString(x.ID) || len(x.Title) > 512 {
+					return false
+				}
+			}
+			return true
+		}
 	}
 	return false
 }
@@ -165,6 +215,8 @@ type ScriptMsg struct {
 	Error     string `json:"error"`
 	Diag      string `json:"diag"`
 	Vote      string `json:"vote"`
+	Fav       string `json:"fav"`
+	Colls     []Coll `json:"colls"`
 }
 
 const maxQRImage = 512 << 10
@@ -190,10 +242,27 @@ func ParseScriptMessage(s string) (ScriptMsg, bool) {
 	case MsgResult:
 		switch m.Result {
 		case ResultDone, ResultAlready, ResultNotSignedIn, ResultFailed:
+			if !digits.MatchString(m.ID) || len(m.Colls) > maxColls {
+				return ScriptMsg{}, false
+			}
 			switch m.Vote {
 			case "", VoteUp, VoteDown, VoteNone:
-				return m, digits.MatchString(m.ID)
+			default:
+				return ScriptMsg{}, false
 			}
+			switch m.Fav {
+			case "", FavYes, FavNo:
+			default:
+				return ScriptMsg{}, false
+			}
+			var colls []Coll
+			for _, c := range m.Colls {
+				if digits.MatchString(c.ID) {
+					colls = append(colls, Coll{ID: c.ID, Title: cleanText(c.Title, 128), In: c.In})
+				}
+			}
+			m.Colls = colls
+			return m, true
 		}
 	}
 	return ScriptMsg{}, false
@@ -270,30 +339,58 @@ func SubscribeScript(id string, unsubscribe, deps bool, post string) string {
 		`})(` + string(b) + `);`
 }
 
-// VoteScript reads the signed-in user's vote on the item page (want "") or
-// clicks Steam's own vote-up / vote-down button and waits until the page shows
-// it. Steam marks the given vote with the "toggled" class on VoteUpBtn /
-// VoteDownBtn and ignores clicks on the vote already given.
-func VoteScript(id, want, post string) string {
+// ItemScript runs one OpItem action on the item's Steam page. Votes and the
+// favorite click Steam's own buttons (#VoteUpBtn, #VoteDownBtn,
+// #FavoriteItemBtn; "toggled" marks the pressed one) and wait for the page to
+// show the change. Collections use the page's own calls (ajaxgetmycollections,
+// ajaxaddtocollections). Award opens Steam's award window (PublishedFileAward);
+// the helper shows the browser window for it. Every answer carries the
+// current vote and favorite.
+func ItemScript(id, action string, colls []CollChange, post string) string {
+	if colls == nil {
+		colls = []CollChange{}
+	}
 	b, _ := json.Marshal(struct {
-		ID   string `json:"id"`
-		Want string `json:"want"`
-	}{id, want})
+		ID    string       `json:"id"`
+		Act   string       `json:"act"`
+		Colls []CollChange `json:"colls"`
+	}{id, action, colls})
 	return `(function(a){` +
 		`function post(o){o.kind='result';o.id=a.id;try{` + post + `(JSON.stringify(o));}catch(e){}}` +
 		`var sid=window.g_steamID;if(!(typeof sid==='string'&&sid.length>0)){post({result:'not_signed_in'});return;}` +
-		`var up=document.getElementById('VoteUpBtn');var dn=document.getElementById('VoteDownBtn');` +
-		`if(!up||!dn){post({result:'failed',error:'Steam shows no vote buttons for this item'});return;}` +
-		`function st(){return up.classList.contains('toggled')?'up':(dn.classList.contains('toggled')?'down':'none');}` +
-		`if(!a.want){post({result:'done',vote:st()});return;}` +
-		`if(st()===a.want){post({result:'already',vote:st()});return;}` +
-		`(a.want==='up'?up:dn).click();var t=0;var iv=setInterval(function(){t++;` +
-		`if(st()===a.want){clearInterval(iv);post({result:'done',vote:st()});return;}` +
+		`var up=document.getElementById('VoteUpBtn');var dn=document.getElementById('VoteDownBtn');var fv=document.getElementById('FavoriteItemBtn');` +
+		`function vote(){if(!up||!dn)return '';return up.classList.contains('toggled')?'up':(dn.classList.contains('toggled')?'down':'none');}` +
+		`function fav(){return fv?(fv.classList.contains('toggled')?'yes':'no'):'';}` +
+		`function done(r,x,extra){var o={result:r,vote:vote(),fav:fav()};if(x)o.error=x;if(extra)o.colls=extra;post(o);}` +
+		`function fail(x){done('failed',x);}` +
+		`function form(o){var p=new URLSearchParams();for(var k in o)p.append(k,o[k]);return p;}` +
+		`function call(u,o){return fetch(u,{method:'POST',credentials:'include',body:form(o)});}` +
+		`var ses=window.g_sessionID||'';` +
+		`if(a.act==='read'){done('done');return;}` +
+		`if(a.act==='collections'){call('https://steamcommunity.com/sharedfiles/ajaxgetmycollections',{appid:'108600',publishedfileid:a.id,sessionid:ses})` +
+		`.then(function(r){return r.json();}).then(function(j){var inn={};` +
+		`(((j||{}).parent_collections||{}).publishedfiledetails||[]).forEach(function(d){inn[d.publishedfileid]=1;});var out=[];` +
+		`(((j||{}).all_collections||{}).publishedfiledetails||[]).forEach(function(d){if(d.result!=1||d.publishedfileid==a.id)return;out.push({id:String(d.publishedfileid),title:String(d.title||''),in:!!inn[d.publishedfileid]});});` +
+		`done('done','',out);}).catch(function(){fail('Steam did not list your collections');});return;}` +
+		`if(a.act==='setcollections'){var p={sessionID:ses,publishedfileid:a.id};a.colls.forEach(function(c){var k='collections['+c.id+']';p[k+(c.add?'[add]':'[remove]')]='true';p[k+'[title]']=c.title;});` +
+		`call('https://steamcommunity.com/sharedfiles/ajaxaddtocollections',p).then(function(r){` +
+		`if(r.ok){done('done');return;}return r.json().then(function(j){var m=[];(((j||{}).results)||[]).forEach(function(x){if(x&&x.error)m.push(x.error);});fail(m.join('; ')||'Steam did not change the collections');});` +
+		`}).catch(function(){fail('Steam did not change the collections');});return;}` +
+		`if(a.act==='award'){if(typeof window.PublishedFileAward!=='function'){fail('Steam shows no Award button for this item');return;}` +
+		`var ft=0;var els=document.querySelectorAll('[onclick*="PublishedFileAward"]');for(var i=0;i<els.length;i++){var r=/PublishedFileAward\(\s*'?\d+'?\s*,\s*(\d+)/.exec(els[i].getAttribute('onclick')||'');if(r){ft=parseInt(r[1],10);break;}}` +
+		`window.PublishedFileAward(a.id,ft);done('done');return;}` +
+		`var want,el,get;` +
+		`if(a.act==='voteup'||a.act==='votedown'){if(!up||!dn){fail('Steam shows no vote buttons for this item');return;}want=a.act==='voteup'?'up':'down';el=want==='up'?up:dn;get=vote;}` +
+		`else if(a.act==='favorite'||a.act==='unfavorite'){if(!fv){fail('Steam shows no Favorite button for this item');return;}want=a.act==='favorite'?'yes':'no';el=fv;get=fav;}` +
+		`else{fail('unknown action');return;}` +
+		`if(get()===want){done('already');return;}` +
+		`el.click();var t=0;var iv=setInterval(function(){t++;` +
+		`if(get()===want){clearInterval(iv);done('done');return;}` +
 		`var d=document.querySelector('.newmodal');` +
 		`if(d&&!d.__pzl){d.__pzl=1;var c=d.querySelector('.newmodal_content');clearInterval(iv);` +
-		`post({result:'failed',vote:st(),error:c?c.textContent:'Steam showed an error'});` +
+		`fail(c?c.textContent:'Steam showed an error');` +
 		`var ok=d.querySelector('.btn_green_steamui,.btn_grey_steamui,.newmodal_close');if(ok)ok.click();return;}` +
-		`if(t>=50){clearInterval(iv);post({result:'failed',vote:st(),error:'Steam did not confirm the vote'});}` +
+		`if(t>=50){clearInterval(iv);fail('Steam did not confirm the change');}` +
 		`},300);` +
 		`})(` + string(b) + `);`
 }
