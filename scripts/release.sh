@@ -18,7 +18,7 @@ SIGNKEY="${SIGNKEY:-$HOME/.signing/pzlauncher-release-ed25519.key}"
 [ -f "$SIGNKEY" ] || { echo "release key $SIGNKEY not found" >&2; exit 1; }
 REPO="katachinosekai/pzlauncher"
 ID="io.github.katachinosekai.pzlauncher"
-RELAY="${RELAY:-https://pzlauncher-report-relay.katachinosekai.workers.dev}"
+RELAY="https://pzlauncher-report-relay.katachinosekai.workers.dev"
 OUT="$ROOT/release/v$V"
 [ -z "$(git status --porcelain --untracked-files=no)" ] || { echo "commit your changes first" >&2; exit 1; }
 scripts/thirdparty.sh >/dev/null
@@ -28,7 +28,7 @@ mkdir -p "$OUT"
 for os in windows linux; do
 	name=PZLauncher
 	[ "$os" = windows ] && name=PZLauncher.exe
-	fyne-cross "$os" -arch amd64 -app-id "$ID" -app-version "$V" -icon cmd/pzlauncher/Icon.png -name "$name" -ldflags "-X=github.com/katachinosekai/pzlauncher/internal/report.RelayURL=$RELAY" ./cmd/pzlauncher
+	fyne-cross "$os" -arch amd64 -app-id "$ID" -app-version "$V" -icon cmd/pzlauncher/Icon.png -name "$name" ./cmd/pzlauncher
 done
 cp fyne-cross/bin/windows-amd64/PZLauncher.exe "$OUT/PZLauncher-windows-amd64.exe"
 cp cmd/pzlauncher/THIRD_PARTY_LICENSES.txt "$OUT/THIRD_PARTY_LICENSES.txt"

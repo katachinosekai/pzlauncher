@@ -15,7 +15,7 @@ import (
 	"unicode/utf8"
 )
 
-var RelayURL = ""
+var RelayURL = "https://pzlauncher-report-relay.katachinosekai.workers.dev"
 
 const App = "pzlauncher"
 

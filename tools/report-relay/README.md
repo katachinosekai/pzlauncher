@@ -13,6 +13,6 @@ Limits: 3 reports per IP per hour (IPs are stored only as salted hashes, for 2 h
 3. `npx wrangler kv namespace create RL` and put the id into `wrangler.toml`; set `REPO` there.
 4. `npx wrangler secret put GITHUB_TOKEN` and `npx wrangler secret put SALT` (any long random string).
 5. `npx wrangler deploy`, note the `https://...workers.dev` URL.
-6. Build releases with the relay URL: `scripts/release.sh` passes `-X .../internal/report.RelayURL=$RELAY` (default https://pzlauncher-report-relay.katachinosekai.workers.dev, workers.dev subdomain `katachinosekai` registered 2026-11-21) and refuses binaries without it.
+6. The relay URL is the default of `report.RelayURL` in internal/report/report.go (workers.dev subdomain `katachinosekai` registered 2026-11-21); `scripts/release.sh` refuses binaries without it.
 
-Done 2026-11-21: Cloudflare account of the user, KV `RL` (id in wrangler.toml), secrets GITHUB_TOKEN (fine-grained, only bug-reports, Contents + Issues read/write; not stored anywhere else) and SALT. Dev builds (`go build`) have no relay URL, so their dialog only saves a local zip.
+Done 2026-11-21: Cloudflare account of the user, KV `RL` (id in wrangler.toml), secrets GITHUB_TOKEN (fine-grained, only bug-reports, Contents + Issues read/write; not stored anywhere else) and SALT. Dev builds send to the same relay.
