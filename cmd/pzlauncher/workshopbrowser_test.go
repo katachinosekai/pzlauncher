@@ -15,6 +15,7 @@ import (
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/test"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
@@ -307,7 +308,7 @@ func TestThumbCacheLocalAndFailures(t *testing.T) {
 
 func TestUpdatedAgo(t *testing.T) {
 	now := time.Date(2026, 11, 21, 12, 0, 0, 0, time.UTC)
-	for days, want := range map[int]string{0: "Today", 1: "This week", 6: "This week", 7: "This month", 29: "This month", 30: "1 month ago", 59: "1 month ago", 60: "2 months ago", 364: "12 months ago", 365: "1 year ago", 729: "1 year ago", 800: "2 years ago"} {
+	for days, want := range map[int]string{0: "Today", 1: "Week", 6: "Week", 7: "Month", 29: "Month", 30: "1 month ago", 59: "1 month ago", 60: "2 months ago", 364: "12 months ago", 365: "1 year ago", 729: "1 year ago", 800: "2 years ago"} {
 		if got := updatedAgo(now.AddDate(0, 0, -days), now); got != want {
 			t.Errorf("%d days: got %q want %q", days, got, want)
 		}
@@ -338,7 +339,7 @@ func TestTitleInfoLayout(t *testing.T) {
 	test.NewTempApp(t)
 	r := newWSRow()
 	r.title.SetText("A very long Workshop item title that will not fit in a narrow row at all")
-	r.info.SetText("B41/B42  ·  12k subscribers  ·  ★ 4/5  ·  This week")
+	r.setInfo("INSTALLED  ·  Week")
 	want := r.text.Layout.(*titleInfoLayout).infoWant()
 	for _, w := range []float32{900, want + wsTitleMinW + 1, want + wsTitleMinW - 40, 260, 200} {
 		r.text.Resize(fyne.NewSize(w, 40))
@@ -358,40 +359,113 @@ func TestTitleInfoLayout(t *testing.T) {
 			t.Errorf("width %v: title %v + info %v overflow", w, title, info)
 		}
 	}
+}
 
-	// with setInfo, tight rows switch to "subs" before anything is cut
-	l := r.text.Layout.(*titleInfoLayout)
-	full := "B41/B42  ·  12k subscribers  ·  ★ 4/5  ·  This week"
-	l.setInfo(full)
-	fullW, shortW := l.want(full), l.want(compactInfo(full))
-	if shortW >= fullW {
-		t.Fatalf("compact text not shorter: %v >= %v", shortW, fullW)
+func TestColumnsLayout(t *testing.T) {
+	test.NewTempApp(t)
+	l := func(r *wsRow) *titleInfoLayout { return r.text.Layout.(*titleInfoLayout) }
+	// two rows with different values get the same column positions
+	a, b := newWSRow(), newWSRow()
+	a.setCols([]string{"B42", "12k subs", "★ 4/5", "Today"}, false)
+	b.setCols([]string{"B41/B42", "999 subs", "", "3 months ago"}, false)
+	full := l(a).cols.width(true) + l(a).extraW()
+	for _, r := range []*wsRow{a, b} {
+		r.text.Resize(fyne.NewSize(full+wsTitleMinW+50, 60))
 	}
-	for _, c := range []struct {
-		w    float32
-		text string
-	}{
-		{fullW + wsTitleMinW + 10, full},
-		{shortW + wsTitleMinW + 2, compactInfo(full)},
-		{fullW + wsTitleMinW + 10, full}, // widening again restores the full text
-	} {
-		r.text.Resize(fyne.NewSize(c.w, 40))
-		if r.info.Text != c.text {
-			t.Errorf("width %v: info text %q, want %q", c.w, r.info.Text, c.text)
+	for i := range a.cols {
+		if a.cols[i].Position() != b.cols[i].Position() || a.cols[i].Size() != b.cols[i].Size() {
+			t.Errorf("column %d not aligned: %v/%v vs %v/%v", i, a.cols[i].Position(), a.cols[i].Size(), b.cols[i].Position(), b.cols[i].Size())
 		}
-		if got := r.text.Objects[1].Size().Width; got != l.want(c.text) {
-			t.Errorf("width %v: info width %v, want %v (not cut)", c.w, got, l.want(c.text))
+		if !a.cols[i].Visible() {
+			t.Errorf("column %d hidden with room to spare", i)
+		}
+	}
+	// every column fits its longest sample uncut
+	w := l(a).cols.widths()
+	for i, ss := range wsModCols {
+		for _, s := range ss {
+			if textWant(s, fyne.TextStyle{}) > w[i] {
+				t.Errorf("column %d too narrow for %q", i, s)
+			}
+		}
+	}
+	// narrower: the build column goes first, the others keep their full width
+	a.text.Resize(fyne.NewSize(full+wsTitleMinW-20, 60))
+	if a.cols[0].Visible() {
+		t.Error("build column still shown on a narrow row")
+	}
+	for i := 1; i < 4; i++ {
+		if !a.cols[i].Visible() || a.cols[i].Size().Width != w[i] {
+			t.Errorf("column %d: visible %v width %v, want %v", i, a.cols[i].Visible(), a.cols[i].Size().Width, w[i])
+		}
+	}
+	// wide again: build comes back
+	a.text.Resize(fyne.NewSize(full+wsTitleMinW+50, 60))
+	if !a.cols[0].Visible() {
+		t.Error("build column not restored")
+	}
+	// switching the row back to a single info line hides the columns
+	a.setInfo("INSTALLED  ·  Today")
+	if a.colBox.Visible() || !a.info.Visible() {
+		t.Error("setInfo left the columns visible")
+	}
+}
+
+func TestWrapBarLayout(t *testing.T) {
+	test.NewTempApp(t)
+	left := widget.NewRadioGroup([]string{"Popular this week", "Most recent"}, nil)
+	left.Horizontal = true
+	right := container.NewHBox(widget.NewLabel("Sort by"), widget.NewSelect([]string{"Steam order"}, nil), widget.NewButton("Refresh", nil), widget.NewButton("Open in browser", nil))
+	l := &wrapBarLayout{}
+	bar := container.New(l, left, layout.NewSpacer(), right)
+	one := l.oneLineW(bar.Objects)
+	bar.Resize(fyne.NewSize(one+20, 40))
+	if l.two {
+		t.Fatal("wrapped although one line fits")
+	}
+	oneH := bar.MinSize().Height
+	bar.Resize(fyne.NewSize(one-20, 40))
+	if !l.two {
+		t.Fatal("did not wrap when one line does not fit")
+	}
+	if bar.MinSize().Height <= oneH {
+		t.Errorf("two-line height %v not above one-line %v", bar.MinSize().Height, oneH)
+	}
+	lp, ls := left.Position(), left.Size()
+	rp := right.Position()
+	if rp.Y < lp.Y+ls.Height {
+		t.Errorf("right side (y %v) overlaps the left side (y %v + %v)", rp.Y, lp.Y, ls.Height)
+	}
+	if rp.X+right.Size().Width > one-20+0.5 {
+		t.Errorf("right side runs past the bar: %v", rp.X+right.Size().Width)
+	}
+	if bar.MinSize().Width >= one {
+		t.Errorf("min width %v would stop the window from shrinking below one line (%v)", bar.MinSize().Width, one)
+	}
+	// in a browse view the status line and list sit below the bar at any width
+	status, list := widget.NewLabel("status"), widget.NewLabel("list")
+	view := container.New(&browseLayout{bar: l}, bar, status, list)
+	for _, w := range []float32{one + 20, one - 20} {
+		view.Resize(fyne.NewSize(w, 400))
+		if status.Position().Y < bar.Size().Height || list.Position().Y < status.Position().Y+status.Size().Height {
+			t.Errorf("width %v: bar h %v, status y %v, list y %v overlap", w, bar.Size().Height, status.Position().Y, list.Position().Y)
+		}
+		if l.two != (w < one) {
+			t.Errorf("width %v: two=%v", w, l.two)
 		}
 	}
 }
 
-func TestSearchInfo(t *testing.T) {
-	d := workshop.Details{Tags: []string{"Build 41", "Build 42"}, Subscriptions: 12345, Stars: 4, Updated: time.Now()}
-	if got, want := searchInfo(d), "B41/B42  ·  12k subscribers  ·  ★ 4/5  ·  Today"; got != want {
-		t.Errorf("searchInfo = %q, want %q", got, want)
+func TestSearchCols(t *testing.T) {
+	d := workshop.Details{Tags: []string{"Build 41", "Build 42"}, Subscriptions: 12345, Stars: 4, Children: 27, Updated: time.Now()}
+	if got, want := strings.Join(searchCols(d, false), "|"), "B41/B42|12k subs|★ 4/5|Today"; got != want {
+		t.Errorf("mod cols = %q, want %q", got, want)
 	}
-	if got := searchInfo(workshop.Details{}); got != "" {
-		t.Errorf("empty searchInfo = %q", got)
+	if got, want := strings.Join(searchCols(d, true), "|"), "B41/B42|★ 4/5|27 items|Today"; got != want {
+		t.Errorf("collection cols = %q, want %q", got, want)
+	}
+	if got := strings.Join(searchCols(workshop.Details{}, false), "|"); got != "|||" {
+		t.Errorf("empty cols = %q", got)
 	}
 }
 

@@ -40,7 +40,7 @@ func (b *wsBrowser) searchTab() (fyne.CanvasObject, func()) {
 	box := container.New(gl, entry)
 	sortSel := widget.NewSelect(workshop.SortNames, nil)
 	sortSel.SetSelected(workshop.SortNames[0])
-	view, load := b.browseView(container.NewBorder(nil, nil, nil, sortSel, box), func() workshop.BrowseQuery {
+	view, load := b.browseView(wsBar{center: box, centerMin: 200, right: []fyne.CanvasObject{sortSel}}, func() workshop.BrowseQuery {
 		return workshop.BrowseQuery{Text: text, Sort: workshop.SortFromName(sortSel.Selected)}
 	})
 	search := func() {

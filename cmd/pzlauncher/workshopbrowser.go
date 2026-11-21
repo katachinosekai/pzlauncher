@@ -99,6 +99,7 @@ type wsItem struct {
 	Installed  bool
 	Preview    string
 	Collection bool
+	Cols       []string // search tabs: column values (see wsColsLayout)
 	subs       int64
 	stars      int
 	size       int64
@@ -280,6 +281,8 @@ type wsRow struct {
 	img     *canvas.Image
 	title   *widget.Label
 	info    *widget.Label
+	cols    [4]*widget.Label // search tabs: aligned columns instead of info
+	colBox  *fyne.Container
 	dot     *canvas.Circle
 	btn     *widget.Button
 	ext     *widget.Button
@@ -292,50 +295,112 @@ type wsRow struct {
 	content fyne.CanvasObject
 }
 
-// wsTitleMinW is the narrowest the title gets before the info line is cut.
+// wsTitleMinW is the narrowest the title gets before the info side gives way.
 const wsTitleMinW = 120
 
-// compactInfo is the info line for tight rows ("12k subscribers" -> "12k subs").
-func compactInfo(s string) string { return strings.Replace(s, " subscribers", " subs", 1) }
-
-// titleInfoLayout lays out [title | info+dot]: the info side gets the width its
-// text needs, the title the rest (shortened with "…" first). When the full
-// info and minTitle don't both fit it switches to the compact info text; only
-// after that, and with the title at minTitle, is the info line itself cut.
-type titleInfoLayout struct {
-	info        *widget.Label
-	extra       fyne.CanvasObject // the status dot, to the right of the info text
-	minTitle    float32
-	full, short string
+// textWant is the width a label needs to show s uncut: text + the label's
+// inner padding on both sides + 1px against rounding (one pixel short and the
+// label already cuts "Today" to "To…").
+func textWant(s string, style fyne.TextStyle) float32 {
+	return fyne.MeasureText(s, theme.TextSize(), style).Width + 2*theme.InnerPadding() + 1
 }
 
-// setInfo sets the info text; Layout picks the full or compact form.
-func (l *titleInfoLayout) setInfo(s string) {
-	l.full, l.short = s, compactInfo(s)
-	l.info.Text = s
+// Column samples (longest expected values) for the search tabs, so every row
+// gets the same column widths and the values line up.
+var (
+	wsModCols  = [4][]string{{"B41/B42"}, {"999k subs", "12.3M subs"}, {"★ 5/5"}, {"12 months ago", "10 years ago"}}
+	wsCollCols = [4][]string{{"B41/B42"}, {"★ 5/5"}, {"9999 items"}, {"12 months ago", "10 years ago"}}
+)
+
+// wsColsLayout places the 4 column labels right-aligned in fixed widths:
+// mods = build | subs | rating | age, collections = build | rating | items | age.
+// The build column (index 0) is hidden when the row is too narrow.
+type wsColsLayout struct {
+	collection bool
+	showBuild  bool
 }
 
-func (l *titleInfoLayout) want(text string) float32 {
-	// text + the label's inner padding on both sides + 1px against rounding
-	// (one pixel short and the label already cuts "Today" to "To…")
-	w := fyne.MeasureText(text, theme.TextSize(), l.info.TextStyle).Width + 2*theme.InnerPadding() + 1
-	if l.extra != nil {
-		w += l.extra.MinSize().Width + theme.Padding() // the Border gap before the dot
+func (l *wsColsLayout) widths() [4]float32 {
+	samples := wsModCols
+	if l.collection {
+		samples = wsCollCols
+	}
+	var w [4]float32
+	for i, ss := range samples {
+		for _, s := range ss {
+			w[i] = max(w[i], textWant(s, fyne.TextStyle{}))
+		}
 	}
 	return w
 }
 
-func (l *titleInfoLayout) infoWant() float32 { return l.want(l.info.Text) }
+func (l *wsColsLayout) width(showBuild bool) float32 {
+	w := l.widths()
+	total := w[1] + w[2] + w[3] + 2*theme.Padding()
+	if showBuild {
+		total += w[0] + theme.Padding()
+	}
+	return total
+}
+
+func (l *wsColsLayout) Layout(objs []fyne.CanvasObject, size fyne.Size) {
+	w := l.widths()
+	x := size.Width
+	for i := 3; i >= 0; i-- {
+		o := objs[i]
+		if i == 0 && !l.showBuild {
+			o.Hide()
+			continue
+		}
+		o.Show()
+		h := o.MinSize().Height
+		x -= w[i]
+		o.Move(fyne.NewPos(x, (size.Height-h)/2))
+		o.Resize(fyne.NewSize(w[i], h))
+		x -= theme.Padding()
+	}
+}
+
+func (l *wsColsLayout) MinSize(objs []fyne.CanvasObject) fyne.Size {
+	h := float32(0)
+	for _, o := range objs {
+		h = max(h, o.MinSize().Height)
+	}
+	return fyne.NewSize(l.width(false), h)
+}
+
+// titleInfoLayout lays out [title | info+dot]: the info side gets the width it
+// needs, the title the rest (shortened with "…" first, down to minTitle).
+// In column mode the build column goes next; only then is anything cut.
+type titleInfoLayout struct {
+	info     *widget.Label
+	cols     *wsColsLayout
+	colBox   *fyne.Container
+	colsOn   bool
+	extra    fyne.CanvasObject // the status dot, to the right of the info
+	minTitle float32
+}
+
+func (l *titleInfoLayout) extraW() float32 {
+	if l.extra == nil {
+		return 0
+	}
+	return l.extra.MinSize().Width + theme.Padding() // dot + the Border gap before it
+}
+
+func (l *titleInfoLayout) infoWant() float32 {
+	if l.colsOn {
+		return l.cols.width(l.cols.showBuild) + l.extraW()
+	}
+	return textWant(l.info.Text, l.info.TextStyle) + l.extraW()
+}
 
 func (l *titleInfoLayout) Layout(objs []fyne.CanvasObject, size fyne.Size) {
-	if l.full != "" {
-		text := l.full
-		if l.want(text) > size.Width-l.minTitle {
-			text = l.short
-		}
-		if l.info.Text != text {
-			l.info.Text = text
-			l.info.Refresh()
+	if l.colsOn {
+		show := l.cols.width(true)+l.extraW() <= size.Width-l.minTitle
+		if show != l.cols.showBuild {
+			l.cols.showBuild = show
+			l.colBox.Refresh()
 		}
 	}
 	iw := min(l.infoWant(), max(size.Width-l.minTitle, objs[1].MinSize().Width))
@@ -350,6 +415,33 @@ func (l *titleInfoLayout) Layout(objs []fyne.CanvasObject, size fyne.Size) {
 func (l *titleInfoLayout) MinSize(objs []fyne.CanvasObject) fyne.Size {
 	a, b := objs[0].MinSize(), objs[1].MinSize()
 	return fyne.NewSize(a.Width+b.Width+theme.Padding(), max(a.Height, b.Height))
+}
+
+// setInfo shows a single info line (subscription tabs).
+func (r *wsRow) setInfo(s string) {
+	l := r.text.Layout.(*titleInfoLayout)
+	l.colsOn = false
+	r.colBox.Hide()
+	r.info.Show()
+	r.info.SetText(s)
+	r.text.Refresh()
+}
+
+// setCols shows aligned columns (search tabs).
+func (r *wsRow) setCols(cols []string, collection bool) {
+	l := r.text.Layout.(*titleInfoLayout)
+	l.colsOn = true
+	l.cols.collection = collection
+	for i, c := range r.cols {
+		t := ""
+		if i < len(cols) {
+			t = cols[i]
+		}
+		c.SetText(t)
+	}
+	r.info.Hide()
+	r.colBox.Show()
+	r.text.Refresh()
 }
 
 const wsDetailsH = 170
@@ -378,10 +470,21 @@ func newWSRow() *wsRow {
 	r.info.Truncation = fyne.TextTruncateEllipsis
 	r.info.Alignment = fyne.TextAlignTrailing
 	r.info.Importance = widget.LowImportance
+	colObjs := make([]fyne.CanvasObject, 4)
+	for i := range r.cols {
+		c := widget.NewLabel("")
+		c.Truncation = fyne.TextTruncateEllipsis
+		c.Alignment = fyne.TextAlignTrailing
+		c.Importance = widget.LowImportance
+		r.cols[i], colObjs[i] = c, c
+	}
+	cl := &wsColsLayout{showBuild: true}
+	r.colBox = container.New(cl, colObjs...)
+	r.colBox.Hide()
 	dotBox := container.New(layout.NewCustomPaddedLayout(0, 0, 6, 8), container.NewCenter(container.NewGridWrap(fyne.NewSize(12, 12), r.dot)))
-	r.text = container.New(&titleInfoLayout{info: r.info, extra: dotBox, minTitle: wsTitleMinW},
+	r.text = container.New(&titleInfoLayout{info: r.info, cols: cl, colBox: r.colBox, extra: dotBox, minTitle: wsTitleMinW},
 		container.NewVBox(layout.NewSpacer(), r.title, layout.NewSpacer()),
-		container.NewBorder(nil, nil, nil, dotBox, container.NewVBox(layout.NewSpacer(), r.info, layout.NewSpacer())),
+		container.NewBorder(nil, nil, nil, dotBox, container.NewStack(container.NewVBox(layout.NewSpacer(), r.info, layout.NewSpacer()), r.colBox)),
 	)
 	right := container.NewCenter(container.NewHBox(r.btn, r.ext, r.toggle))
 	inner := container.New(layout.NewCustomPaddedLayout(4, 4, 4, 4), container.NewBorder(nil, nil, container.NewStack(thumbBg, r.img), right, r.text))
@@ -525,8 +628,11 @@ func (b *wsBrowser) itemList(items *[]wsItem, nearEnd func()) *widget.List {
 			if it.State != "" {
 				info = strings.ToUpper(it.State) + "  ·  " + info
 			}
-			r.text.Layout.(*titleInfoLayout).setInfo(info)
-			r.text.Refresh() // re-split title/info for the new text width (refreshes the label)
+			if it.Cols != nil {
+				r.setCols(it.Cols, it.Collection)
+			} else {
+				r.setInfo(info)
+			}
 			busy := b.busy[it.ID]
 			sub := b.subscribed(it)
 			r.dot.FillColor = wsDotColor(busy, sub, it.Installed)
@@ -640,7 +746,7 @@ func detailsInfo(d workshop.Details) string {
 func popularity(d workshop.Details) []string {
 	var parts []string
 	if d.Subscriptions > 0 {
-		parts = append(parts, humanCount(d.Subscriptions)+" subscribers")
+		parts = append(parts, humanCount(d.Subscriptions)+" subs")
 	}
 	if d.Stars > 0 {
 		parts = append(parts, fmt.Sprintf("★ %d/5", d.Stars))
@@ -686,18 +792,27 @@ func buildLabel(tags []string) string {
 	return strings.Join(nums, "/")
 }
 
-// searchInfo is the collapsed line for search results (Popular / Recent,
-// Search for Collection, the magnifier search): build, subscribers, rating, age.
-func searchInfo(d workshop.Details) string {
-	var parts []string
-	if b := buildLabel(d.Tags); b != "" {
-		parts = append(parts, b)
+// searchCols are the column values for search results (Popular / Recent,
+// Search for Collection, the magnifier search):
+// mods = build | subs | rating | age, collections = build | rating | items | age.
+func searchCols(d workshop.Details, collection bool) []string {
+	var subs, rating, items, age string
+	if d.Subscriptions > 0 {
+		subs = humanCount(d.Subscriptions) + " subs"
 	}
-	parts = append(parts, popularity(d)...)
-	if rest := detailsInfo(d); rest != "" {
-		parts = append(parts, rest)
+	if d.Stars > 0 {
+		rating = fmt.Sprintf("★ %d/5", d.Stars)
 	}
-	return strings.Join(parts, "  ·  ")
+	if d.Children > 0 {
+		items = fmt.Sprintf("%d items", d.Children)
+	}
+	if !d.Updated.IsZero() {
+		age = updatedAgo(d.Updated, time.Now())
+	}
+	if collection {
+		return []string{buildLabel(d.Tags), rating, items, age}
+	}
+	return []string{buildLabel(d.Tags), subs, rating, age}
 }
 
 func detailsDetail(d workshop.Details) string {
@@ -710,9 +825,9 @@ func updatedAgo(t, now time.Time) string {
 	case days < 1:
 		return "Today"
 	case days < 7:
-		return "This week"
+		return "Week"
 	case days < 30:
-		return "This month"
+		return "Month"
 	case days < 365:
 		if n := days / 30; n > 1 {
 			return fmt.Sprintf("%d months ago", n)
@@ -725,12 +840,117 @@ func updatedAgo(t, now time.Time) string {
 	return "1 year ago"
 }
 
-func (b *wsBrowser) browseView(controls fyne.CanvasObject, query func() workshop.BrowseQuery) (fyne.CanvasObject, func()) {
-	view, load, _ := b.browseViewSorted(controls, query, nil)
+// wsBar is a search tab's control bar: left (filter options), center (grows,
+// e.g. a search box; at least centerMin wide) and right (buttons). "Open in
+// browser" is appended on the right. It wraps to two lines when too narrow.
+type wsBar struct {
+	left, center fyne.CanvasObject
+	centerMin    float32
+	right        []fyne.CanvasObject
+}
+
+// wrapBarLayout lays out [left | center | right] on one line, or left on the
+// first line and [center | right] on the second when one line doesn't fit.
+// Fyne asks MinSize without a width, so the parent (browseLayout) asks
+// heightFor(width) instead; MinSize's height follows the last layout.
+type wrapBarLayout struct {
+	centerMin float32
+	two       bool
+}
+
+func (l *wrapBarLayout) wraps(objs []fyne.CanvasObject, width float32) bool {
+	_, _, _, hasLeft := l.parts(objs)
+	return hasLeft && l.oneLineW(objs) > width
+}
+
+// heightFor is the bar height at the given width.
+func (l *wrapBarLayout) heightFor(objs []fyne.CanvasObject, width float32) float32 {
+	lw, cw, rw, _ := l.parts(objs)
+	if l.wraps(objs, width) {
+		return lw.Height + theme.Padding() + max(cw.Height, rw.Height)
+	}
+	return max(lw.Height, cw.Height, rw.Height)
+}
+
+func (l *wrapBarLayout) parts(objs []fyne.CanvasObject) (lw, cw, rw fyne.Size, hasLeft bool) {
+	lw, cw, rw = objs[0].MinSize(), objs[1].MinSize(), objs[2].MinSize()
+	cw.Width = max(cw.Width, l.centerMin)
+	return lw, cw, rw, lw.Width > 0
+}
+
+func (l *wrapBarLayout) oneLineW(objs []fyne.CanvasObject) float32 {
+	lw, cw, rw, hasLeft := l.parts(objs)
+	w := cw.Width + rw.Width + theme.Padding()
+	if hasLeft {
+		w += lw.Width + theme.Padding()
+	}
+	return w
+}
+
+func (l *wrapBarLayout) MinSize(objs []fyne.CanvasObject) fyne.Size {
+	lw, cw, rw, _ := l.parts(objs)
+	w := max(lw.Width, cw.Width+rw.Width+theme.Padding()) // the two-line width, so the window can shrink
+	if l.two {
+		return fyne.NewSize(w, lw.Height+theme.Padding()+max(cw.Height, rw.Height))
+	}
+	return fyne.NewSize(w, max(lw.Height, cw.Height, rw.Height))
+}
+
+func (l *wrapBarLayout) Layout(objs []fyne.CanvasObject, size fyne.Size) {
+	lw, _, rw, hasLeft := l.parts(objs)
+	two := l.wraps(objs, size.Width)
+	l.two = two
+	pad := theme.Padding()
+	y, h := float32(0), size.Height
+	cx := float32(0)
+	if two {
+		objs[0].Move(fyne.NewPos(0, 0))
+		objs[0].Resize(fyne.NewSize(min(lw.Width, size.Width), lw.Height))
+		y = lw.Height + pad
+		h = max(size.Height-y, 0)
+	} else if hasLeft {
+		objs[0].Move(fyne.NewPos(0, 0))
+		objs[0].Resize(fyne.NewSize(lw.Width, h))
+		cx = lw.Width + pad
+	}
+	objs[2].Move(fyne.NewPos(size.Width-rw.Width, y))
+	objs[2].Resize(fyne.NewSize(rw.Width, h))
+	objs[1].Move(fyne.NewPos(cx, y))
+	objs[1].Resize(fyne.NewSize(max(size.Width-rw.Width-pad-cx, 0), h))
+}
+
+// browseLayout stacks [bar, status, list]: the bar gets its height for the
+// current width (one or two lines), the status line below it, the list the rest.
+type browseLayout struct{ bar *wrapBarLayout }
+
+func (l *browseLayout) Layout(objs []fyne.CanvasObject, size fyne.Size) {
+	bar, status, list := objs[0], objs[1], objs[2]
+	pad := theme.Padding()
+	bh := l.bar.heightFor(bar.(*fyne.Container).Objects, size.Width)
+	bar.Move(fyne.NewPos(0, 0))
+	bar.Resize(fyne.NewSize(size.Width, bh))
+	y := bh + pad
+	if status.Visible() {
+		sh := status.MinSize().Height
+		status.Move(fyne.NewPos(0, y))
+		status.Resize(fyne.NewSize(size.Width, sh))
+		y += sh + pad
+	}
+	list.Move(fyne.NewPos(0, y))
+	list.Resize(fyne.NewSize(size.Width, max(size.Height-y, 0)))
+}
+
+func (l *browseLayout) MinSize(objs []fyne.CanvasObject) fyne.Size {
+	b, s, li := objs[0].MinSize(), objs[1].MinSize(), objs[2].MinSize()
+	return fyne.NewSize(max(b.Width, s.Width, li.Width), b.Height+s.Height+li.Height+2*theme.Padding())
+}
+
+func (b *wsBrowser) browseView(bar wsBar, query func() workshop.BrowseQuery) (fyne.CanvasObject, func()) {
+	view, load, _ := b.browseViewSorted(bar, query, nil)
 	return view, load
 }
 
-func (b *wsBrowser) browseViewSorted(controls fyne.CanvasObject, query func() workshop.BrowseQuery, order func([]wsItem)) (fyne.CanvasObject, func(), func()) {
+func (b *wsBrowser) browseViewSorted(bar wsBar, query func() workshop.BrowseQuery, order func([]wsItem)) (fyne.CanvasObject, func(), func()) {
 	var items []wsItem
 	page := 1
 	var current workshop.BrowseQuery
@@ -782,7 +1002,8 @@ func (b *wsBrowser) browseViewSorted(controls fyne.CanvasObject, query func() wo
 					list.ScrollToTop()
 				}
 				for _, d := range r.Items {
-					items = append(items, wsItem{ID: d.ID, Title: d.Title, Info: searchInfo(d), Detail: strings.Join(sizeAndDate(d.Size, d.Updated), "  ·  "), Tags: d.Tags, Desc: d.Description, Preview: d.Preview, Collection: d.Collection || q.Collections, subs: d.Subscriptions, stars: d.Stars, size: d.Size, updated: d.Updated.Unix(), seq: len(items)})
+					coll := d.Collection || q.Collections
+					items = append(items, wsItem{ID: d.ID, Title: d.Title, Cols: searchCols(d, coll), Detail: strings.Join(sizeAndDate(d.Size, d.Updated), "  ·  "), Tags: d.Tags, Desc: d.Description, Preview: d.Preview, Collection: coll, subs: d.Subscriptions, stars: d.Stars, size: d.Size, updated: d.Updated.Unix(), seq: len(items)})
 				}
 				hasMore = r.TotalPages > page && len(r.Items) > 0
 				if order != nil {
@@ -800,14 +1021,23 @@ func (b *wsBrowser) browseViewSorted(controls fyne.CanvasObject, query func() wo
 	openBrowse := widget.NewButtonWithIcon("Open in browser", theme.ComputerIcon(), func() {
 		b.openExternal(workshop.BrowseURL("", query()))
 	})
-	top := container.NewVBox(container.NewBorder(nil, nil, nil, openBrowse, controls), status)
+	left, center := bar.left, bar.center
+	if left == nil {
+		left = layout.NewSpacer()
+	}
+	if center == nil {
+		center = layout.NewSpacer()
+	}
+	barLayout := &wrapBarLayout{centerMin: bar.centerMin}
+	barBox := container.New(barLayout, left, center, container.NewHBox(append(bar.right, openBrowse)...))
 	resort := func() {
 		if order != nil {
 			order(items)
 			b.refreshList(list)
 		}
 	}
-	return container.NewBorder(top, nil, nil, nil, list), func() { load(true) }, resort
+	view := container.New(&browseLayout{bar: barLayout}, barBox, status, list)
+	return view, func() { load(true) }, resort
 }
 
 func (b *wsBrowser) collectionsTab() (fyne.CanvasObject, func()) {
@@ -820,7 +1050,7 @@ func (b *wsBrowser) collectionsTab() (fyne.CanvasObject, func()) {
 	entry.SetPlaceHolder("Search collections...")
 	var load func()
 	refresh := widget.NewButtonWithIcon("", theme.SearchIcon(), func() { load() })
-	view, l := b.browseView(container.NewBorder(nil, nil, radio, refresh, entry), func() workshop.BrowseQuery {
+	view, l := b.browseView(wsBar{left: radio, center: entry, centerMin: 200, right: []fyne.CanvasObject{refresh}}, func() workshop.BrowseQuery {
 		q := workshop.BrowseQuery{Text: entry.Text, Collections: true, Sort: workshop.SortTrendWeek}
 		switch radio.Selected {
 		case opts[1]:
@@ -865,8 +1095,8 @@ func (b *wsBrowser) popularTab() (fyne.CanvasObject, func()) {
 	}
 	var load func()
 	refresh := widget.NewButtonWithIcon("Refresh", theme.ViewRefreshIcon(), func() { load() })
-	controls := container.NewBorder(nil, nil, nil, container.NewHBox(widget.NewLabel("Sort by"), sortSel, refresh), radio)
-	view, l, resort := b.browseViewSorted(controls, func() workshop.BrowseQuery {
+	bar := wsBar{left: radio, right: []fyne.CanvasObject{widget.NewLabel("Sort by"), sortSel, refresh}}
+	view, l, resort := b.browseViewSorted(bar, func() workshop.BrowseQuery {
 		if radio.Selected == opts[1] {
 			return workshop.BrowseQuery{Sort: workshop.SortRecent}
 		}
