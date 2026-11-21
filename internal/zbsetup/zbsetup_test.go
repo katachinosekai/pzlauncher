@@ -148,6 +148,8 @@ func TestLaunchEdits(t *testing.T) {
 		{"empty linux", "linux", "", "-javaagent:ZombieBuddy.jar --", ""},
 		{"empty windows", "windows", "", "-agentlib:zbNative --", ""},
 		{"user real", "linux", "gamemoderun %command% -javaagent:ZombieBuddy.jar -- -", "gamemoderun %command% -javaagent:ZombieBuddy.jar -- -", "gamemoderun %command% -"},
+		{"malloc prefix kept", "linux", "MALLOC_ARENA_MAX=2 gamemoderun %command% -javaagent:ZombieBuddy.jar -- -", "MALLOC_ARENA_MAX=2 gamemoderun %command% -javaagent:ZombieBuddy.jar -- -", "MALLOC_ARENA_MAX=2 gamemoderun %command% -"},
+		{"malloc prefix add", "linux", "MALLOC_ARENA_MAX=2 gamemoderun %command% -", "MALLOC_ARENA_MAX=2 gamemoderun %command% -javaagent:ZombieBuddy.jar -- -", "MALLOC_ARENA_MAX=2 gamemoderun %command% -"},
 		{"gamemoderun add", "linux", "gamemoderun %command% -", "gamemoderun %command% -javaagent:ZombieBuddy.jar -- -", "gamemoderun %command% -"},
 		{"gamemoderun bare", "linux", "gamemoderun %command%", "gamemoderun %command% -javaagent:ZombieBuddy.jar --", "gamemoderun %command%"},
 		{"no command, game args", "linux", "-debug", "-javaagent:ZombieBuddy.jar -- -debug", "-debug"},
