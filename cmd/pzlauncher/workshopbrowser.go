@@ -277,22 +277,25 @@ func (b *wsBrowser) toggle(it wsItem) {
 
 type wsRow struct {
 	widget.BaseWidget
-	card    *tapCard
-	img     *canvas.Image
-	title   *widget.Label
-	info    *widget.Label
-	cols    [4]*widget.Label // search tabs: aligned columns instead of info
-	colBox  *fyne.Container
-	dot     *canvas.Circle
-	btn     *widget.Button
-	ext     *widget.Button
-	toggle  *widget.Button
-	details *widget.Label
-	detBox  fyne.CanvasObject
-	body    *fyne.Container
-	text    *fyne.Container
-	preview string
-	content fyne.CanvasObject
+	bg, thumbBg *canvas.Rectangle
+	rightBox    *fyne.Container
+	card        *tapCard
+	img         *canvas.Image
+	title       *widget.Label
+	info        *widget.Label
+	cols        [4]*widget.Label // search tabs: aligned columns instead of info
+	colBox      *fyne.Container
+	colArea     fyne.CanvasObject // colBox inside its tight-padding theme override
+	dot         *canvas.Circle
+	btn         *widget.Button
+	ext         *widget.Button
+	toggle      *widget.Button
+	details     *widget.Label
+	detBox      fyne.CanvasObject
+	body        *fyne.Container
+	text        *fyne.Container
+	preview     string
+	content     fyne.CanvasObject
 }
 
 // wsTitleMinW is the narrowest the title gets before the info side gives way.
@@ -305,9 +308,33 @@ func textWant(s string, style fyne.TextStyle) float32 {
 	return fyne.MeasureText(s, theme.TextSize(), style).Width + 2*theme.InnerPadding() + 1
 }
 
-// Column samples (longest expected values) for the search tabs, so every row
-// gets the same column widths and the values line up.
+// Column cells use a tight inner padding (theme override on the column area)
+// and a fixed gap, so the title keeps more of the row.
+const (
+	wsColPad = 2
+	wsColGap = 10
+)
+
+// tightTheme is the app theme with a small inner padding, for the column cells.
+type tightTheme struct{ fyne.Theme }
+
+func (t tightTheme) Size(n fyne.ThemeSizeName) float32 {
+	if n == theme.SizeNameInnerPadding {
+		return wsColPad
+	}
+	return t.Theme.Size(n)
+}
+
+// colWant is the width a column cell needs to show s uncut.
+func colWant(s string, style fyne.TextStyle) float32 {
+	return fyne.MeasureText(s, theme.TextSize(), style).Width + 2*wsColPad + 1
+}
+
+// Column headers and samples (longest expected values) for the search tabs, so
+// every row and the header get the same column widths and line up.
 var (
+	wsModHead  = []string{"Build", "Subs", "Rating", "Updated"}
+	wsCollHead = []string{"Build", "Rating", "Items", "Updated"}
 	wsModCols  = [4][]string{{"B41/B42"}, {"999k subs", "12.3M subs"}, {"★ 5/5"}, {"12 months ago", "10 years ago"}}
 	wsCollCols = [4][]string{{"B41/B42"}, {"★ 5/5"}, {"9999 items"}, {"12 months ago", "10 years ago"}}
 )
@@ -321,14 +348,15 @@ type wsColsLayout struct {
 }
 
 func (l *wsColsLayout) widths() [4]float32 {
-	samples := wsModCols
+	samples, head := wsModCols, wsModHead
 	if l.collection {
-		samples = wsCollCols
+		samples, head = wsCollCols, wsCollHead
 	}
 	var w [4]float32
 	for i, ss := range samples {
+		w[i] = colWant(head[i], fyne.TextStyle{Bold: true})
 		for _, s := range ss {
-			w[i] = max(w[i], textWant(s, fyne.TextStyle{}))
+			w[i] = max(w[i], colWant(s, fyne.TextStyle{}))
 		}
 	}
 	return w
@@ -336,9 +364,9 @@ func (l *wsColsLayout) widths() [4]float32 {
 
 func (l *wsColsLayout) width(showBuild bool) float32 {
 	w := l.widths()
-	total := w[1] + w[2] + w[3] + 2*theme.Padding()
+	total := w[1] + w[2] + w[3] + 2*wsColGap
 	if showBuild {
-		total += w[0] + theme.Padding()
+		total += w[0] + wsColGap
 	}
 	return total
 }
@@ -357,7 +385,7 @@ func (l *wsColsLayout) Layout(objs []fyne.CanvasObject, size fyne.Size) {
 		x -= w[i]
 		o.Move(fyne.NewPos(x, (size.Height-h)/2))
 		o.Resize(fyne.NewSize(w[i], h))
-		x -= theme.Padding()
+		x -= wsColGap
 	}
 }
 
@@ -421,7 +449,7 @@ func (l *titleInfoLayout) MinSize(objs []fyne.CanvasObject) fyne.Size {
 func (r *wsRow) setInfo(s string) {
 	l := r.text.Layout.(*titleInfoLayout)
 	l.colsOn = false
-	r.colBox.Hide()
+	r.colArea.Hide()
 	r.info.Show()
 	r.info.SetText(s)
 	r.text.Refresh()
@@ -440,11 +468,53 @@ func (r *wsRow) setCols(cols []string, collection bool) {
 		c.SetText(t)
 	}
 	r.info.Hide()
-	r.colBox.Show()
+	r.colArea.Show()
 	r.text.Refresh()
 }
 
 const wsDetailsH = 170
+
+// wsBtnSize fits the widest text the row's main button shows.
+func wsBtnSize() fyne.Size {
+	var sz fyne.Size
+	for _, t := range []string{"Subscribe", "Subscribed", "View items", "Working..."} {
+		b := widget.NewButton(t, nil)
+		b.Importance = widget.HighImportance
+		sz = sz.Max(b.MinSize())
+	}
+	return sz
+}
+
+// newWSHeader is the column header for a search tab's list: a row with the
+// same layout and blank stand-ins for the thumbnail, buttons and dot, so each
+// heading sits over its column and hides the build heading with the rows.
+func newWSHeader(collection bool) *wsRow {
+	h := newWSRow()
+	h.bg.FillColor = color.Transparent
+	h.thumbBg.FillColor = color.Transparent
+	h.img.SetMinSize(fyne.NewSize(64, 0))
+	rs := h.rightBox.MinSize()
+	pad := canvas.NewRectangle(color.Transparent)
+	pad.SetMinSize(fyne.NewSize(rs.Width, 0))
+	h.rightBox.Objects = []fyne.CanvasObject{pad}
+	h.dot.FillColor = color.Transparent
+	h.title.TextStyle = fyne.TextStyle{Bold: true}
+	h.title.Importance = widget.LowImportance
+	h.title.SetText("Name")
+	for _, c := range h.cols {
+		c.TextStyle = fyne.TextStyle{Bold: true}
+	}
+	h.setHeader(collection)
+	return h
+}
+
+func (r *wsRow) setHeader(collection bool) {
+	head := wsModHead
+	if collection {
+		head = wsCollHead
+	}
+	r.setCols(head, collection)
+}
 
 func newWSRow() *wsRow {
 	r := &wsRow{
@@ -463,6 +533,7 @@ func newWSRow() *wsRow {
 	bg.CornerRadius = 10
 	thumbBg := canvas.NewRectangle(color.NRGBA{128, 128, 128, 40})
 	thumbBg.CornerRadius = 8
+	r.bg, r.thumbBg = bg, thumbBg
 	r.img.FillMode = canvas.ImageFillContain
 	r.img.CornerRadius = 8
 	r.img.SetMinSize(fyne.NewSize(64, 64))
@@ -480,13 +551,18 @@ func newWSRow() *wsRow {
 	}
 	cl := &wsColsLayout{showBuild: true}
 	r.colBox = container.New(cl, colObjs...)
-	r.colBox.Hide()
-	dotBox := container.New(layout.NewCustomPaddedLayout(0, 0, 6, 8), container.NewCenter(container.NewGridWrap(fyne.NewSize(12, 12), r.dot)))
+	colArea := container.NewThemeOverride(r.colBox, tightTheme{fyne.CurrentApp().Settings().Theme()})
+	colArea.Hide()
+	r.colArea = colArea
+	dotBox := container.New(layout.NewCustomPaddedLayout(0, 0, 4, 4), container.NewCenter(container.NewGridWrap(fyne.NewSize(12, 12), r.dot)))
 	r.text = container.New(&titleInfoLayout{info: r.info, cols: cl, colBox: r.colBox, extra: dotBox, minTitle: wsTitleMinW},
 		container.NewVBox(layout.NewSpacer(), r.title, layout.NewSpacer()),
-		container.NewBorder(nil, nil, nil, dotBox, container.NewStack(container.NewVBox(layout.NewSpacer(), r.info, layout.NewSpacer()), r.colBox)),
+		container.NewBorder(nil, nil, nil, dotBox, container.NewStack(container.NewVBox(layout.NewSpacer(), r.info, layout.NewSpacer()), colArea)),
 	)
-	right := container.NewCenter(container.NewHBox(r.btn, r.ext, r.toggle))
+	// fixed-width main button, so "Subscribe" / "Subscribed" / "View items"
+	// rows keep their columns at the same place (and under the header)
+	r.rightBox = container.NewHBox(container.NewGridWrap(wsBtnSize(), r.btn), r.ext, r.toggle)
+	right := container.NewCenter(r.rightBox)
 	inner := container.New(layout.NewCustomPaddedLayout(4, 4, 4, 4), container.NewBorder(nil, nil, container.NewStack(thumbBg, r.img), right, r.text))
 	r.card = newTapCard(container.NewStack(bg, inner))
 	detScroll := container.NewVScroll(r.details)
@@ -919,12 +995,13 @@ func (l *wrapBarLayout) Layout(objs []fyne.CanvasObject, size fyne.Size) {
 	objs[1].Resize(fyne.NewSize(max(size.Width-rw.Width-pad-cx, 0), h))
 }
 
-// browseLayout stacks [bar, status, list]: the bar gets its height for the
-// current width (one or two lines), the status line below it, the list the rest.
+// browseLayout stacks [bar, status, header, list]: the bar gets its height for
+// the current width (one or two lines), then the status line and the column
+// header at their own height, the list the rest.
 type browseLayout struct{ bar *wrapBarLayout }
 
 func (l *browseLayout) Layout(objs []fyne.CanvasObject, size fyne.Size) {
-	bar, status, list := objs[0], objs[1], objs[2]
+	bar, status, header, list := objs[0], objs[1], objs[2], objs[3]
 	pad := theme.Padding()
 	bh := l.bar.heightFor(bar.(*fyne.Container).Objects, size.Width)
 	bar.Move(fyne.NewPos(0, 0))
@@ -936,13 +1013,19 @@ func (l *browseLayout) Layout(objs []fyne.CanvasObject, size fyne.Size) {
 		status.Resize(fyne.NewSize(size.Width, sh))
 		y += sh + pad
 	}
+	if header.Visible() {
+		hh := header.MinSize().Height
+		header.Move(fyne.NewPos(0, y))
+		header.Resize(fyne.NewSize(size.Width, hh))
+		y += hh
+	}
 	list.Move(fyne.NewPos(0, y))
 	list.Resize(fyne.NewSize(size.Width, max(size.Height-y, 0)))
 }
 
 func (l *browseLayout) MinSize(objs []fyne.CanvasObject) fyne.Size {
-	b, s, li := objs[0].MinSize(), objs[1].MinSize(), objs[2].MinSize()
-	return fyne.NewSize(max(b.Width, s.Width, li.Width), b.Height+s.Height+li.Height+2*theme.Padding())
+	b, s, h, li := objs[0].MinSize(), objs[1].MinSize(), objs[2].MinSize(), objs[3].MinSize()
+	return fyne.NewSize(max(b.Width, s.Width, h.Width, li.Width), b.Height+s.Height+h.Height+li.Height+2*theme.Padding())
 }
 
 func (b *wsBrowser) browseView(bar wsBar, query func() workshop.BrowseQuery) (fyne.CanvasObject, func()) {
@@ -964,9 +1047,11 @@ func (b *wsBrowser) browseViewSorted(bar wsBar, query func() workshop.BrowseQuer
 	})
 	status := widget.NewLabel("")
 	status.Truncation = fyne.TextTruncateEllipsis
+	header := newWSHeader(false)
 	load = func(reset bool) {
 		if reset {
 			current = query()
+			header.setHeader(current.Collections)
 			page = 1
 		} else {
 			page++
@@ -1036,7 +1121,7 @@ func (b *wsBrowser) browseViewSorted(bar wsBar, query func() workshop.BrowseQuer
 			b.refreshList(list)
 		}
 	}
-	view := container.New(&browseLayout{bar: barLayout}, barBox, status, list)
+	view := container.New(&browseLayout{bar: barLayout}, barBox, status, header, list)
 	return view, func() { load(true) }, resort
 }
 

@@ -384,7 +384,7 @@ func TestColumnsLayout(t *testing.T) {
 	w := l(a).cols.widths()
 	for i, ss := range wsModCols {
 		for _, s := range ss {
-			if textWant(s, fyne.TextStyle{}) > w[i] {
+			if colWant(s, fyne.TextStyle{}) > w[i] {
 				t.Errorf("column %d too narrow for %q", i, s)
 			}
 		}
@@ -406,8 +406,69 @@ func TestColumnsLayout(t *testing.T) {
 	}
 	// switching the row back to a single info line hides the columns
 	a.setInfo("INSTALLED  ·  Today")
-	if a.colBox.Visible() || !a.info.Visible() {
+	if a.colArea.Visible() || !a.info.Visible() {
 		t.Error("setInfo left the columns visible")
+	}
+}
+
+// absX is o's x offset inside root (positions are relative to each parent).
+func absX(root, o fyne.CanvasObject) (float32, bool) {
+	if root == o {
+		return 0, true
+	}
+	var kids []fyne.CanvasObject
+	switch v := root.(type) {
+	case *fyne.Container:
+		kids = v.Objects
+	case fyne.Widget:
+		kids = test.WidgetRenderer(v).Objects()
+	}
+	for _, k := range kids {
+		if x, ok := absX(k, o); ok {
+			return k.Position().X + x, true
+		}
+	}
+	return 0, false
+}
+
+func TestHeaderAlignsWithRows(t *testing.T) {
+	test.NewTempApp(t)
+	const width = 900
+	for _, coll := range []bool{false, true} {
+		h := newWSHeader(coll)
+		a, b := newWSRow(), newWSRow()
+		a.btn.SetText("Subscribe")
+		b.btn.SetText("Subscribed")
+		if coll {
+			a.btn.SetText("View items")
+		}
+		a.setCols([]string{"B42", "12k subs", "★ 4/5", "Today"}, coll)
+		b.setCols([]string{"B41/B42", "3 subs", "", "3 months ago"}, coll)
+		for _, w := range []float32{width, 560} {
+			for _, r := range []*wsRow{h, a, b} {
+				r.Resize(fyne.NewSize(w, r.MinSize().Height))
+			}
+			for i := range h.cols {
+				hx, ok1 := absX(h, h.cols[i])
+				ax, ok2 := absX(a, a.cols[i])
+				bx, ok3 := absX(b, b.cols[i])
+				if !ok1 || !ok2 || !ok3 {
+					t.Fatalf("column %d not found in the row tree", i)
+				}
+				if hx != ax || ax != bx || h.cols[i].Size().Width != a.cols[i].Size().Width {
+					t.Errorf("coll=%v width %v column %d: header x %v, rows x %v / %v", coll, w, i, hx, ax, bx)
+				}
+				if h.cols[i].Visible() != a.cols[i].Visible() {
+					t.Errorf("coll=%v width %v column %d: header visible %v, row %v", coll, w, i, h.cols[i].Visible(), a.cols[i].Visible())
+				}
+			}
+			if w == 560 && a.cols[0].Visible() {
+				t.Errorf("coll=%v: build column still shown at %v", coll, w)
+			}
+		}
+		if h.MinSize().Height >= a.MinSize().Height {
+			t.Errorf("header (%v) not slimmer than a row (%v)", h.MinSize().Height, a.MinSize().Height)
+		}
 	}
 }
 
@@ -444,10 +505,11 @@ func TestWrapBarLayout(t *testing.T) {
 	}
 	// in a browse view the status line and list sit below the bar at any width
 	status, list := widget.NewLabel("status"), widget.NewLabel("list")
-	view := container.New(&browseLayout{bar: l}, bar, status, list)
+	header := widget.NewLabel("header")
+	view := container.New(&browseLayout{bar: l}, bar, status, header, list)
 	for _, w := range []float32{one + 20, one - 20} {
 		view.Resize(fyne.NewSize(w, 400))
-		if status.Position().Y < bar.Size().Height || list.Position().Y < status.Position().Y+status.Size().Height {
+		if status.Position().Y < bar.Size().Height || header.Position().Y < status.Position().Y+status.Size().Height || list.Position().Y < header.Position().Y+header.Size().Height {
 			t.Errorf("width %v: bar h %v, status y %v, list y %v overlap", w, bar.Size().Height, status.Position().Y, list.Position().Y)
 		}
 		if l.two != (w < one) {
