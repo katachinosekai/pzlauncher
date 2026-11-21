@@ -232,7 +232,7 @@ func TestSubItems(t *testing.T) {
 		t.Fatal(order)
 	}
 	mine := items[2]
-	if mine.displayTitle() != "Mine" || mine.Preview != "/x/poster.png" || !strings.Contains(mine.Info, "2.0 MB") || !strings.Contains(mine.Info, "private or hidden") || !strings.Contains(mine.Info, "From mod.info.") {
+	if mine.displayTitle() != "Mine" || mine.Preview != "/x/poster.png" || !strings.Contains(mine.Info, "2.0 MB") || !strings.Contains(mine.Info, "private or hidden") || mine.Desc != "From mod.info." || strings.Contains(mine.Info, "From mod.info.") {
 		t.Fatalf("%+v", mine)
 	}
 	if items[4].displayTitle() != "Workshop item 4" || items[1].Preview != det["2"].Preview || !items[1].Installed || items[0].Installed {

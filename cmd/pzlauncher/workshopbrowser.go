@@ -70,6 +70,7 @@ type wsItem struct {
 	ID         string
 	Title      string
 	Info       string
+	Desc       string
 	State      string
 	Subscribed bool
 	Installed  bool
@@ -103,6 +104,14 @@ type wsBrowser struct {
 	busy     map[string]bool
 	subState map[string]bool
 	watchers []func()
+	fixes    map[*widget.List]func()
+}
+
+func (b *wsBrowser) refreshList(l *widget.List) {
+	l.Refresh()
+	if fix := b.fixes[l]; fix != nil {
+		fix()
+	}
 }
 
 func (u *ui) workshopTab() fyne.CanvasObject {
@@ -249,19 +258,29 @@ type wsRow struct {
 	dot     *canvas.Circle
 	btn     *widget.Button
 	ext     *widget.Button
+	toggle  *widget.Button
+	details *widget.Label
+	detBox  fyne.CanvasObject
+	body    *fyne.Container
 	preview string
 	content fyne.CanvasObject
 }
 
+const wsDetailsH = 120
+
 func newWSRow() *wsRow {
 	r := &wsRow{
-		img:   canvas.NewImageFromImage(nil),
-		title: widget.NewLabel(""),
-		info:  widget.NewLabel(""),
-		dot:   canvas.NewCircle(theme.Color(theme.ColorNameDisabled)),
-		btn:   widget.NewButton("Subscribe", nil),
-		ext:   widget.NewButtonWithIcon("", theme.ComputerIcon(), nil),
+		img:     canvas.NewImageFromImage(nil),
+		title:   widget.NewLabel(""),
+		info:    widget.NewLabel(""),
+		dot:     canvas.NewCircle(theme.Color(theme.ColorNameDisabled)),
+		btn:     widget.NewButton("Subscribe", nil),
+		ext:     widget.NewButtonWithIcon("", theme.ComputerIcon(), nil),
+		toggle:  widget.NewButtonWithIcon("", theme.MenuDropDownIcon(), nil),
+		details: widget.NewLabel(""),
 	}
+	r.toggle.Importance = widget.LowImportance
+	r.details.Wrapping = fyne.TextWrapWord
 	bg := canvas.NewRectangle(theme.Color(theme.ColorNameInputBackground))
 	bg.CornerRadius = 10
 	thumbBg := canvas.NewRectangle(color.NRGBA{128, 128, 128, 40})
@@ -278,10 +297,15 @@ func newWSRow() *wsRow {
 		container.NewVBox(layout.NewSpacer(), r.title, layout.NewSpacer()),
 		container.NewBorder(nil, nil, nil, dotBox, container.NewVBox(layout.NewSpacer(), r.info, layout.NewSpacer())),
 	)
-	right := container.NewCenter(container.NewHBox(r.btn, r.ext))
+	right := container.NewCenter(container.NewHBox(r.btn, r.ext, r.toggle))
 	inner := container.New(layout.NewCustomPaddedLayout(4, 4, 4, 4), container.NewBorder(nil, nil, container.NewStack(thumbBg, r.img), right, text))
 	r.card = newTapCard(container.NewStack(bg, inner))
-	r.content = container.New(layout.NewCustomPaddedLayout(3, 3, 0, 0), r.card)
+	detScroll := container.NewVScroll(r.details)
+	detScroll.SetMinSize(fyne.NewSize(0, wsDetailsH))
+	r.detBox = container.New(layout.NewCustomPaddedLayout(0, 0, 16, 0), detScroll)
+	r.detBox.Hide()
+	r.body = container.NewVBox(r.card, r.detBox)
+	r.content = container.New(layout.NewCustomPaddedLayout(3, 3, 0, 0), r.body)
 	r.ExtendBaseWidget(r)
 	return r
 }
@@ -315,6 +339,7 @@ func (b *wsBrowser) showMenu(it wsItem, e *fyne.PointEvent) {
 	menu := fyne.NewMenu("",
 		sub,
 		fyne.NewMenuItemSeparator(),
+		fyne.NewMenuItem("Open in Steam", func() { b.openExternal("steam://url/CommunityFilePage/" + it.ID) }),
 		fyne.NewMenuItem("Open in browser", func() { b.openExternal(link) }),
 		fyne.NewMenuItem("Copy link", func() {
 			b.u.app.Clipboard().SetContent(link)
@@ -324,8 +349,46 @@ func (b *wsBrowser) showMenu(it wsItem, e *fyne.PointEvent) {
 	widget.ShowPopUpMenuAtPosition(menu, b.u.win.Canvas(), e.AbsolutePosition)
 }
 
+func wsDetailsText(it wsItem) string {
+	var parts []string
+	if it.State != "" {
+		parts = append(parts, it.State)
+	}
+	if it.Info != "" {
+		parts = append(parts, it.Info)
+	}
+	if it.Desc != "" {
+		parts = append(parts, it.Desc)
+	}
+	parts = append(parts, "Workshop item "+it.ID)
+	return strings.Join(parts, "\n\n")
+}
+
 func (b *wsBrowser) itemList(items *[]wsItem, nearEnd func()) *widget.List {
 	var list *widget.List
+	expanded := map[string]bool{}
+	heights := map[int]float32{}
+	collapsedH := newWSRow().MinSize().Height
+	expandedH := collapsedH + wsDetailsH + theme.Padding()
+	fix := func() {
+		for i, it := range *items {
+			want := collapsedH
+			if expanded[it.ID] {
+				want = expandedH
+			}
+			if h, ok := heights[i]; ok && h == want || !ok && want == collapsedH {
+				continue
+			}
+			heights[i] = want
+			list.SetItemHeight(i, want)
+		}
+		for i := range heights {
+			if i >= len(*items) {
+				delete(heights, i)
+				list.SetItemHeight(i, collapsedH)
+			}
+		}
+	}
 	list = widget.NewList(
 		func() int { return len(*items) },
 		func() fyne.CanvasObject { return newWSRow() },
@@ -348,6 +411,21 @@ func (b *wsBrowser) itemList(items *[]wsItem, nearEnd func()) *widget.List {
 			sub := b.subscribed(it)
 			r.dot.FillColor = wsDotColor(busy, sub, it.Installed)
 			r.dot.Refresh()
+			open := expanded[it.ID]
+			r.toggle.OnTapped = func() {
+				expanded[it.ID] = !open
+				fix()
+				list.RefreshItem(i)
+			}
+			if open {
+				r.toggle.SetIcon(theme.MenuDropUpIcon())
+				r.details.SetText(wsDetailsText(it))
+				r.detBox.Show()
+			} else {
+				r.toggle.SetIcon(theme.MenuDropDownIcon())
+				r.detBox.Hide()
+			}
+			r.body.Refresh()
 			if it.Collection {
 				r.dot.FillColor = color.Transparent
 				r.dot.Refresh()
@@ -357,6 +435,7 @@ func (b *wsBrowser) itemList(items *[]wsItem, nearEnd func()) *widget.List {
 				r.btn.Refresh()
 				r.btn.OnTapped = func() { b.openCollection(it.ID, it.displayTitle()) }
 			}
+			r.btn.Show()
 			switch {
 			case it.Collection:
 			case busy:
@@ -364,9 +443,7 @@ func (b *wsBrowser) itemList(items *[]wsItem, nearEnd func()) *widget.List {
 				r.btn.Importance = widget.MediumImportance
 				r.btn.Disable()
 			case sub:
-				r.btn.SetText("Unsubscribe")
-				r.btn.Importance = widget.MediumImportance
-				r.btn.Enable()
+				r.btn.Hide()
 			default:
 				r.btn.SetText("Subscribe")
 				r.btn.Importance = widget.HighImportance
@@ -395,7 +472,11 @@ func (b *wsBrowser) itemList(items *[]wsItem, nearEnd func()) *widget.List {
 	)
 	list.HideSeparators = true
 	list.OnSelected = func(widget.ListItemID) { list.UnselectAll() }
-	b.watch(list.Refresh)
+	if b.fixes == nil {
+		b.fixes = map[*widget.List]func(){}
+	}
+	b.fixes[list] = fix
+	b.watch(func() { b.refreshList(list) })
 	return list
 }
 
@@ -439,9 +520,6 @@ func detailsInfo(d workshop.Details) string {
 	}
 	if !d.Updated.IsZero() {
 		parts = append(parts, "updated "+d.Updated.Format("2006-01-02"))
-	}
-	if d.Description != "" {
-		parts = append(parts, d.Description)
 	}
 	return strings.Join(parts, "  ·  ")
 }
@@ -494,7 +572,7 @@ func (b *wsBrowser) browseViewSorted(controls fyne.CanvasObject, query func() wo
 					status.SetText("Could not load the list: " + err.Error() + " (use \"Open in browser\")")
 					if reset {
 						items = nil
-						list.Refresh()
+						b.refreshList(list)
 					}
 					return
 				}
@@ -503,13 +581,13 @@ func (b *wsBrowser) browseViewSorted(controls fyne.CanvasObject, query func() wo
 					list.ScrollToTop()
 				}
 				for _, d := range r.Items {
-					items = append(items, wsItem{ID: d.ID, Title: d.Title, Info: detailsInfo(d), Preview: d.Preview, Collection: d.Collection || q.Collections, subs: d.Subscriptions, stars: d.Stars, size: d.Size, updated: d.Updated.Unix(), seq: len(items)})
+					items = append(items, wsItem{ID: d.ID, Title: d.Title, Info: detailsInfo(d), Desc: d.Description, Preview: d.Preview, Collection: d.Collection || q.Collections, subs: d.Subscriptions, stars: d.Stars, size: d.Size, updated: d.Updated.Unix(), seq: len(items)})
 				}
 				hasMore = r.TotalPages > page && len(r.Items) > 0
 				if order != nil {
 					order(items)
 				}
-				list.Refresh()
+				b.refreshList(list)
 				kind := "items"
 				if q.Collections {
 					kind = "collections"
@@ -525,7 +603,7 @@ func (b *wsBrowser) browseViewSorted(controls fyne.CanvasObject, query func() wo
 	resort := func() {
 		if order != nil {
 			order(items)
-			list.Refresh()
+			b.refreshList(list)
 		}
 	}
 	return container.NewBorder(top, nil, nil, nil, list), func() { load(true) }, resort
@@ -637,9 +715,6 @@ func subItems(subs []workshop.Sub, det map[string]workshop.Details, local map[st
 			if detailsOK {
 				parts = append(parts, "private or hidden on the Workshop")
 			}
-			if l.Description != "" {
-				parts = append(parts, l.Description)
-			}
 			info = strings.Join(parts, "  ·  ")
 		}
 		title := d.Title
@@ -650,7 +725,11 @@ func subItems(subs []workshop.Sub, det map[string]workshop.Details, local map[st
 		if preview == "" {
 			preview = l.Image
 		}
-		items = append(items, wsItem{ID: s.ID, Title: title, Info: info, State: subStateLabel(s.State), Subscribed: true, Installed: s.State == workshop.SubInstalled, Preview: preview, sub: s.State})
+		desc := d.Description
+		if desc == "" {
+			desc = l.Description
+		}
+		items = append(items, wsItem{ID: s.ID, Title: title, Info: info, Desc: desc, State: subStateLabel(s.State), Subscribed: true, Installed: s.State == workshop.SubInstalled, Preview: preview, sub: s.State})
 	}
 	sort.SliceStable(items, func(i, j int) bool {
 		a, b := items[i], items[j]
@@ -704,7 +783,7 @@ func (b *wsBrowser) subsTab() (fyne.CanvasObject, func()) {
 				if err != nil {
 					summary.SetText("Could not read Steam's Workshop file (appworkshop_108600.acf): " + err.Error())
 					items = nil
-					list.Refresh()
+					b.refreshList(list)
 					return
 				}
 				counts := map[workshop.SubState]int{}
@@ -712,7 +791,7 @@ func (b *wsBrowser) subsTab() (fyne.CanvasObject, func()) {
 					counts[s.State]++
 				}
 				items = subItems(subs, det, local, derr == nil)
-				list.Refresh()
+				b.refreshList(list)
 				msg := fmt.Sprintf("%d subscribed: %d installed, %d update pending, %d downloading or queued.", len(subs), counts[workshop.SubInstalled], counts[workshop.SubNeedsUpdate], counts[workshop.SubDownloading])
 				if derr != nil {
 					msg += " Titles unavailable: " + derr.Error()
@@ -859,7 +938,7 @@ func (b *wsBrowser) collectionView(fixed string) (fyne.CanvasObject, func()) {
 				if err != nil {
 					summary.SetText("Check failed: " + err.Error())
 					items = nil
-					list.Refresh()
+					b.refreshList(list)
 					return
 				}
 				miss := map[string]workshop.Item{}
@@ -879,7 +958,7 @@ func (b *wsBrowser) collectionView(fixed string) (fyne.CanvasObject, func()) {
 					case workshop.NotSubscribed:
 						label = "Not subscribed"
 					}
-					it := wsItem{ID: m.ID, Title: title(m.ID, m.Title), Info: detailsInfo(d), State: label, Subscribed: subbed, Preview: preview(m.ID)}
+					it := wsItem{ID: m.ID, Title: title(m.ID, m.Title), Info: detailsInfo(d), Desc: d.Description, State: label, Subscribed: subbed, Preview: preview(m.ID)}
 					missing = append(missing, it)
 				}
 				for _, id := range r.IDs {
@@ -887,11 +966,11 @@ func (b *wsBrowser) collectionView(fixed string) (fyne.CanvasObject, func()) {
 						continue
 					}
 					d := det[id]
-					installed = append(installed, wsItem{ID: id, Title: title(id, ""), Info: detailsInfo(d), State: "Installed", Subscribed: true, Installed: true, Preview: preview(id)})
+					installed = append(installed, wsItem{ID: id, Title: title(id, ""), Info: detailsInfo(d), Desc: d.Description, State: "Installed", Subscribed: true, Installed: true, Preview: preview(id)})
 				}
 				items = append(append(items, missing...), installed...)
 				byPopular(items, det)
-				list.Refresh()
+				b.refreshList(list)
 				msg := fmt.Sprintf("%d of %d collection items downloaded.", r.Installed, r.Total)
 				if len(r.Missing) == 0 {
 					msg += " Everything is there."
