@@ -42,7 +42,7 @@ ARCH=x86_64 "$APPIMAGETOOL" --no-appstream "$APPDIR" "$OUT/PZLauncher-linux-x86_
 got="$("$OUT/PZLauncher-linux-x86_64.AppImage" -version)"
 [ "$got" = "$V" ] || { echo "AppImage reports version '$got', want '$V'" >&2; exit 1; }
 for b in fyne-cross/bin/windows-amd64/PZLauncher.exe fyne-cross/bin/linux-amd64/pzlauncher; do
-	grep -q "$RELAY" "$b" || { echo "$b does not contain the report relay URL" >&2; exit 1; }
+	grep -aqF "$RELAY" "$b" || { echo "$b does not contain the report relay URL" >&2; exit 1; }
 done
 cd "$OUT"
 python3 -I - "$V" <<'PY'
