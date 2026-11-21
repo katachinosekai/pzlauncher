@@ -581,7 +581,7 @@ func popularity(d workshop.Details) []string {
 		parts = append(parts, humanCount(d.Subscriptions)+" subscribers")
 	}
 	if d.Stars > 0 {
-		parts = append(parts, fmt.Sprintf("rating %d/5", d.Stars))
+		parts = append(parts, fmt.Sprintf("★ %d/5", d.Stars))
 	}
 	return parts
 }
@@ -600,7 +600,7 @@ func sizeAndDate(size int64, updated time.Time) []string {
 var buildTag = regexp.MustCompile(`(?i)^\s*build\s*(\d+(?:\.\d+)*)\s*$`)
 
 // buildLabel turns the Workshop's "Build NN" tags into a short label:
-// "41", "42", "41/42" when both, any other build as its number.
+// "B41", "B42", "B41/B42" when both, any other build as B<number>.
 func buildLabel(tags []string) string {
 	seen := map[string]bool{}
 	var nums []string
@@ -618,6 +618,9 @@ func buildLabel(tags []string) string {
 		}
 		return nums[i] < nums[j]
 	})
+	for i, n := range nums {
+		nums[i] = "B" + n
+	}
 	return strings.Join(nums, "/")
 }
 

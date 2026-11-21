@@ -319,12 +319,12 @@ func TestBuildLabel(t *testing.T) {
 		tags []string
 		want string
 	}{
-		{[]string{"Build 41", "Map"}, "41"},
-		{[]string{"Build 42", "Vehicles"}, "42"},
-		{[]string{"Build 42", "Build 41"}, "41/42"},
-		{[]string{"Build 40"}, "40"},
-		{[]string{"build 41", "Build 42", "Build 43"}, "41/42/43"},
-		{[]string{"Build 41", "Build 41"}, "41"},
+		{[]string{"Build 41", "Map"}, "B41"},
+		{[]string{"Build 42", "Vehicles"}, "B42"},
+		{[]string{"Build 42", "Build 41"}, "B41/B42"},
+		{[]string{"Build 40"}, "B40"},
+		{[]string{"build 41", "Build 42", "Build 43"}, "B41/B42/B43"},
+		{[]string{"Build 41", "Build 41"}, "B41"},
 		{[]string{"Map", "Buildings"}, ""},
 		{nil, ""},
 	} {
@@ -336,7 +336,7 @@ func TestBuildLabel(t *testing.T) {
 
 func TestSearchInfo(t *testing.T) {
 	d := workshop.Details{Tags: []string{"Build 41", "Build 42"}, Subscriptions: 12345, Stars: 4, Updated: time.Now()}
-	if got, want := searchInfo(d), "41/42  ·  12k subscribers  ·  rating 4/5  ·  Today"; got != want {
+	if got, want := searchInfo(d), "B41/B42  ·  12k subscribers  ·  ★ 4/5  ·  Today"; got != want {
 		t.Errorf("searchInfo = %q, want %q", got, want)
 	}
 	if got := searchInfo(workshop.Details{}); got != "" {
