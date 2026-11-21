@@ -4,3 +4,4 @@
 *.AppImage
 .shots/
 /release/
+tools/report-relay/.wrangler/
