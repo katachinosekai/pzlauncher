@@ -65,6 +65,13 @@ type Options struct {
 	ZombieBuddyJar         string
 	RemoveZombieBuddy      bool
 	RemoveZombieBuddyFiles bool
+	// ZombieBuddyMalloc: ZombieBuddy setup on Linux also adds MALLOC_ARENA_MAX=2
+	// to the Steam launch options (one Steam restart for both).
+	ZombieBuddyMalloc bool
+	// SetMallocArena / RemoveMallocArena: the MallocArena entry point adds or
+	// removes MALLOC_ARENA_MAX=2 in the Steam launch options (Linux only).
+	SetMallocArena    bool
+	RemoveMallocArena bool
 }
 
 type Report struct {

@@ -166,3 +166,104 @@ func TestRunWithoutZombieBuddyOption(t *testing.T) {
 		t.Fatal("ZombieBuddy set up without the option")
 	}
 }
+
+func TestMallocArenaLinux(t *testing.T) {
+	tr := zbTree(t, "linux", "gamemoderun %command% -javaagent:ZombieBuddy.jar -- -")
+	var log []string
+	o := tr.opts("linux", &log)
+	o.SetMallocArena = true
+	o.DryRun = true
+	before := snapshot(t, tr.root)
+	r, err := MallocArena(context.Background(), o)
+	if err != nil || len(r.Changes) != 2 {
+		t.Fatal(err, r.Changes)
+	}
+	if d := snapshot(t, tr.root); len(d) != len(before) {
+		t.Fatal("dry run wrote files")
+	}
+	o.DryRun, o.NoLogFile = false, true
+	r, err = MallocArena(context.Background(), o)
+	if err != nil {
+		t.Fatal(err, log)
+	}
+	want := "MALLOC_ARENA_MAX=2 gamemoderun %command% -javaagent:ZombieBuddy.jar -- -|MALLOC_ARENA_MAX=2 %command% -nosound"
+	if got := strings.Join(launchValues(t, tr), "|"); got != want {
+		t.Fatal(got)
+	}
+	if tr.sys.closes != 1 || tr.sys.starts != 1 || !tr.sys.running[steamProcess] {
+		t.Fatal("steam", tr.sys.closes, tr.sys.starts)
+	}
+	if len(backupDirs(t, tr.root)) != 1 {
+		t.Fatal("no backup")
+	}
+	if r, _ = MallocArena(context.Background(), o); len(r.Changes) != 0 || tr.sys.closes != 1 {
+		t.Fatal("second run changed or closed Steam", r.Changes)
+	}
+
+	// ZombieBuddy removal keeps the prefix.
+	o.SetMallocArena, o.RemoveZombieBuddy = false, true
+	if _, err := ZombieBuddy(context.Background(), o); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(launchValues(t, tr), "|"); got != "MALLOC_ARENA_MAX=2 gamemoderun %command% -|MALLOC_ARENA_MAX=2 %command% -nosound" {
+		t.Fatal(got)
+	}
+	o.RemoveZombieBuddy, o.RemoveMallocArena = false, true
+	if _, err := MallocArena(context.Background(), o); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(launchValues(t, tr), "|"); got != "gamemoderun %command% -|%command% -nosound" {
+		t.Fatal(got)
+	}
+}
+
+func TestMallocArenaKeepsUserValueAndSkipsWindows(t *testing.T) {
+	tr := zbTree(t, "linux", "MALLOC_ARENA_MAX=4 %command%")
+	var log []string
+	o := tr.opts("linux", &log)
+	o.RemoveMallocArena = true
+	if r, err := MallocArena(context.Background(), o); err != nil || len(r.Changes) != 0 {
+		t.Fatal(err, r.Changes)
+	}
+	if got := strings.Join(launchValues(t, tr), "|"); got != "MALLOC_ARENA_MAX=4 %command%|-nosound" {
+		t.Fatal(got)
+	}
+
+	wt := zbTree(t, "windows", "-nojoy")
+	wo := wt.opts("windows", &log)
+	wo.SetMallocArena = true
+	if r, err := MallocArena(context.Background(), wo); err != nil || len(r.Changes) != 0 || wt.sys.closes != 0 {
+		t.Fatal(err, r.Changes)
+	}
+}
+
+func TestZombieBuddySetupAddsMalloc(t *testing.T) {
+	tr := zbTree(t, "linux", "gamemoderun %command% -")
+	var log []string
+	o := tr.opts("linux", &log)
+	o.SetupZombieBuddy, o.ZombieBuddyMalloc = true, true
+	r, err := ZombieBuddy(context.Background(), o)
+	if err != nil {
+		t.Fatal(err, log)
+	}
+	want := "MALLOC_ARENA_MAX=2 gamemoderun %command% -javaagent:ZombieBuddy.jar -- -|MALLOC_ARENA_MAX=2 %command% -javaagent:ZombieBuddy.jar -- -nosound"
+	if got := strings.Join(launchValues(t, tr), "|"); got != want {
+		t.Fatal(got)
+	}
+	if tr.sys.closes != 1 || tr.sys.starts != 1 {
+		t.Fatal("steam restarted more than once", tr.sys.closes, tr.sys.starts)
+	}
+	if joined := strings.Join(r.Changes, "\n"); !strings.Contains(joined, "before: gamemoderun %command% -\n    after:  MALLOC_ARENA_MAX=2 gamemoderun %command% -javaagent:ZombieBuddy.jar -- -") {
+		t.Fatal(joined)
+	}
+
+	wt := zbTree(t, "windows", "-nojoy")
+	wo := wt.opts("windows", &log)
+	wo.SetupZombieBuddy, wo.ZombieBuddyMalloc = true, true
+	if _, err := ZombieBuddy(context.Background(), wo); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(launchValues(t, wt), "|"); strings.Contains(got, "MALLOC") {
+		t.Fatal("malloc added on Windows:", got)
+	}
+}

@@ -73,6 +73,9 @@ func (in *Installer) zbPlan() zbsetup.Plan {
 	if in.opts.SetupZombieBuddy {
 		p := zbsetup.SetupPlan(in.opts.GOOS, in.gameDir, in.zbLibs(), configs)
 		zbsetup.ApplyCustomJar(&p, in.gameDir, in.opts.ZombieBuddyJar)
+		if in.opts.ZombieBuddyMalloc && in.opts.GOOS != "windows" {
+			zbsetup.AddMallocToPlan(&p, configs)
+		}
 		return p
 	}
 	return zbsetup.RemovePlan(in.gameDir, configs, in.opts.RemoveZombieBuddyFiles)
@@ -164,6 +167,65 @@ func (in *Installer) zbCopy(c zbsetup.FileCopy) error {
 }
 
 func (in *Installer) zbLaunchOptions(ctx context.Context) error {
+	return in.writeLaunchOptions(ctx, func() []zbsetup.ConfigEdit {
+		configs := in.zbPlan().Configs
+		if len(configs) > 0 && in.opts.SetupZombieBuddy && in.opts.DryRun {
+			in.zb.planned = true
+		}
+		return configs
+	})
+}
+
+// MallocArena adds or removes MALLOC_ARENA_MAX=2 in Steam's launch options
+// for Project Zomboid (Settings > Java options). Steam is closed for the edit
+// and started again afterwards.
+func MallocArena(ctx context.Context, opts Options) (Report, error) {
+	in, err := New(opts)
+	if err != nil {
+		return Report{Failed: true}, err
+	}
+	for _, s := range []func(context.Context) error{in.Preflight, in.Locate, in.Malloc} {
+		if err = s(ctx); err != nil {
+			break
+		}
+	}
+	return in.Finish(err), err
+}
+
+func (in *Installer) Malloc(ctx context.Context) error {
+	on := in.opts.SetMallocArena
+	if !on && !in.opts.RemoveMallocArena {
+		return nil
+	}
+	if in.opts.GOOS == "windows" {
+		in.say("MALLOC_ARENA_MAX only works on Linux; skipped")
+		return nil
+	}
+	if on {
+		in.say("Limit memory pools: adding " + zbsetup.MallocToken + " to Steam's launch options")
+	} else {
+		in.say("Limit memory pools: removing " + zbsetup.MallocToken + " from Steam's launch options")
+	}
+	plan := zbsetup.MallocPlan(in.zbConfigs(), on)
+	for _, w := range plan.Warnings {
+		in.warn(w)
+	}
+	if len(plan.Configs) == 0 {
+		in.say("  already as chosen")
+		in.say("")
+		return nil
+	}
+	err := in.writeLaunchOptions(ctx, func() []zbsetup.ConfigEdit {
+		return zbsetup.MallocPlan(in.zbConfigs(), on).Configs
+	})
+	in.say("")
+	return err
+}
+
+// writeLaunchOptions closes Steam if it runs (Steam rewrites localconfig.vdf
+// when it exits), then plans the edits from the files as they are now, backs
+// each file up and writes it. Steam is started again in Finish.
+func (in *Installer) writeLaunchOptions(ctx context.Context, plan func() []zbsetup.ConfigEdit) error {
 	touchSteam := !in.opts.NoWait && !in.opts.DryRun
 	if touchSteam && in.steamRunning() {
 		in.say("  closing Steam to change the launch options (it is started again afterwards)...")
@@ -177,18 +239,14 @@ func (in *Installer) zbLaunchOptions(ctx context.Context) error {
 		}
 		in.zb.steamToRestart = true
 	}
-	plan := in.zbPlan()
 	root := filepath.Clean(in.steamRoot)
-	for _, c := range plan.Configs {
+	for _, c := range plan() {
 		for _, e := range c.Edits {
 			before := e.Before
 			if e.Inserted {
 				before = "(none)"
 			}
 			in.change(fmt.Sprintf("  Steam launch options (%s):\n    before: %s\n    after:  %s", c.Path, before, e.After))
-		}
-		if in.opts.SetupZombieBuddy && in.opts.DryRun {
-			in.zb.planned = true
 		}
 		if in.opts.DryRun {
 			continue

@@ -15,6 +15,7 @@ import (
 	"fyne.io/fyne/v2/storage"
 	"fyne.io/fyne/v2/widget"
 
+	"github.com/katachinosekai/pzlauncher/internal/gamecfg"
 	"github.com/katachinosekai/pzlauncher/internal/install"
 	"github.com/katachinosekai/pzlauncher/internal/paths"
 	"github.com/katachinosekai/pzlauncher/internal/play"
@@ -290,6 +291,7 @@ func (u *ui) zombieBuddyTab() fyne.CanvasObject {
 			ZombieBuddyJar:         zbCustomJar(),
 			RemoveZombieBuddy:      !on,
 			RemoveZombieBuddyFiles: deleteFiles,
+			ZombieBuddyMalloc:      on && runtime.GOOS == "linux" && gamecfg.MallocWanted(),
 		})
 	}
 	finish := func(r install.Report, err error) {

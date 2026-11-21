@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -19,6 +20,9 @@ import (
 	"fyne.io/fyne/v2/widget"
 
 	"github.com/katachinosekai/pzlauncher/internal/gamecfg"
+	"github.com/katachinosekai/pzlauncher/internal/install"
+	"github.com/katachinosekai/pzlauncher/internal/paths"
+	"github.com/katachinosekai/pzlauncher/internal/zbsetup"
 )
 
 var flagHelp = map[string]string{
@@ -236,6 +240,52 @@ func (u *ui) settingsTab() fyne.CanvasObject {
 		flagChecks[f] = c
 		flagBox.Add(container.New(layout.NewCustomPaddedLayout(2, 8, 0, 0), container.NewVBox(c, subLine(raw.rt))))
 	}
+	// MALLOC_ARENA_MAX=2 lives in Steam's launch options (the launcher starts
+	// the game through Steam), so it is Linux-only and saved separately.
+	var mallocCheck *widget.Check
+	var mallocSub *mutedText
+	mallocOn, mallocOK := false, false
+	if runtime.GOOS == "linux" {
+		mallocCheck = widget.NewCheck("Limit memory pools (about 1 GB less RAM, no FPS cost)", nil)
+		mallocSub = newMuted(zbsetup.MallocToken+" (Steam launch options)", true)
+		flagBox.Add(container.New(layout.NewCustomPaddedLayout(2, 8, 0, 0), container.NewVBox(mallocCheck, subLine(mallocSub.rt))))
+	}
+	loadMalloc := func() {
+		if mallocCheck == nil {
+			return
+		}
+		mallocOK = false
+		var files, vals []string
+		if root, err := paths.SteamRoot(); err == nil {
+			files = install.LaunchFiles(root)
+		}
+		for _, f := range files {
+			b, err := os.ReadFile(f)
+			if err != nil {
+				continue
+			}
+			if v, err := zbsetup.ReadLaunchOptions(string(b)); err == nil {
+				vals = append(vals, v...)
+			}
+		}
+		if len(files) == 0 {
+			mallocCheck.SetChecked(false)
+			mallocCheck.Disable()
+			mallocSub.SetText(zbsetup.MallocToken + " (Steam's launch options were not found)")
+			return
+		}
+		on, other := zbsetup.MallocStatus(vals)
+		if other != "" {
+			mallocCheck.SetChecked(true)
+			mallocCheck.Disable()
+			mallocSub.SetText(zbsetup.MallocVar + "=" + other + " set by you in Steam's launch options; the launcher leaves it alone")
+			return
+		}
+		mallocOn, mallocOK = on, true
+		mallocCheck.SetChecked(on)
+		mallocCheck.Enable()
+		mallocSub.SetText(zbsetup.MallocToken + " (Steam launch options)")
+	}
 	argsLabel := widget.NewLabel("")
 	argsLabel.TextStyle = fyne.TextStyle{Monospace: true}
 	argsLabel.Wrapping = fyne.TextWrapBreak
@@ -309,6 +359,25 @@ func (u *ui) settingsTab() fyne.CanvasObject {
 		argsLabel.SetText(strings.Join(i.Args, "\n"))
 	}
 
+	var applyMalloc func(on bool, msg string)
+	// rememberMalloc saves the checkbox as the user's choice and returns true
+	// when Steam's launch options have to change (applyMalloc then reports).
+	rememberMalloc := func(msg string) bool {
+		if mallocCheck == nil || !mallocOK {
+			return false
+		}
+		on := mallocCheck.Checked
+		if err := env.SetMallocChoice(on); err != nil {
+			msg += "\ncould not remember the memory-pool choice: " + err.Error()
+		}
+		if on == mallocOn {
+			status.SetText(msg)
+			return true
+		}
+		applyMalloc(on, msg)
+		return true
+	}
+
 	saveJVM := widget.NewButton("Save memory & Java options", func() {
 		if !jvmOK {
 			showErr(errors.New("ProjectZomboid64.json could not be read"))
@@ -344,6 +413,9 @@ func (u *ui) settingsTab() fyne.CanvasObject {
 		if len(notes) > 0 {
 			msg += "\n" + strings.Join(notes, "\n")
 		}
+		if rememberMalloc(msg) {
+			return
+		}
 		status.SetText(msg)
 	})
 	saveJVM.Importance = widget.HighImportance
@@ -362,8 +434,51 @@ func (u *ui) settingsTab() fyne.CanvasObject {
 		if len(notes) > 0 {
 			msg += "\n" + strings.Join(notes, "\n")
 		}
+		if mallocCheck != nil && mallocOK {
+			if on, set := env.MallocChoice(); set && on != mallocOn {
+				applyMalloc(on, msg)
+				return
+			}
+		}
 		status.SetText(msg)
 	})
+	applyMalloc = func(on bool, msg string) {
+		saveJVM.Disable()
+		reapply.Disable()
+		status.SetText(msg + "\nChanging Steam's launch options (Steam is closed and started again)...")
+		go func() {
+			r, err := install.MallocArena(u.ctx, install.Options{
+				PackDir:           zbWorkDir(),
+				SetMallocArena:    on,
+				RemoveMallocArena: !on,
+			})
+			fyne.Do(func() {
+				saveJVM.Enable()
+				reapply.Enable()
+				loadMalloc()
+				switch {
+				case err != nil:
+					msg += "\nSteam's launch options were not changed: " + err.Error()
+				case len(r.Changes) == 0 && len(r.Warnings) == 0:
+					msg += "\nSteam's launch options already as chosen."
+				case len(r.Changes) > 0:
+					word := "added to"
+					if !on {
+						word = "removed from"
+					}
+					msg += "\n" + zbsetup.MallocToken + " " + word + " Steam's launch options"
+					if r.BackupDir != "" {
+						msg += " (backup: " + r.BackupDir + ")"
+					}
+					msg += "."
+				}
+				for _, w := range r.Warnings {
+					msg += "\nWarning: " + w
+				}
+				status.SetText(msg)
+			})
+		}()
+	}
 	updNote := newMuted("A Steam game update can reset ProjectZomboid64.json. Your last saved memory settings are remembered; use \"Re-apply\" to put them back.", false)
 
 	memCard := settingsSection("Memory", "",
@@ -373,7 +488,11 @@ func (u *ui) settingsTab() fyne.CanvasObject {
 			container.NewBorder(nil, nil, widget.NewLabel("Soft limit"), nil, softSel)),
 		tighten(softNote.rt),
 		freeLabel, jsonRow)
-	javaCard := settingsSection("Java options", "Memory-saving options from the pack. Other entries in ProjectZomboid64.json are never changed.",
+	javaSub := "Memory-saving options from the pack. Other entries in ProjectZomboid64.json are never changed."
+	if mallocCheck != nil {
+		javaSub += " The memory-pool limit is kept in Steam's launch options instead; changing it closes and restarts Steam."
+	}
+	javaCard := settingsSection("Java options", javaSub,
 		flagBox, widget.NewAccordion(widget.NewAccordionItem("All Java options (read-only)", argsLabel)),
 		container.NewHBox(saveJVM, reapply), updNote.rt)
 
@@ -540,12 +659,14 @@ func (u *ui) settingsTab() fyne.CanvasObject {
 
 	reload := widget.NewButton("Reload", func() {
 		loadJVM()
+		loadMalloc()
 		loadOpts()
 		status.SetText("Reloaded.")
 	})
 	safety := newMuted("Settings can only be saved while the game is closed. Each file is backed up once a day before the first change (<file>.launcher-bak-YYYYMMDD).", false)
 
 	loadJVM()
+	loadMalloc()
 	loadOpts()
 	if len(envErrs) > 0 {
 		var msgs []string

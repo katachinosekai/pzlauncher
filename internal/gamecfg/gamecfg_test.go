@@ -449,3 +449,22 @@ func TestNothingRemembered(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestMallocChoice(t *testing.T) {
+	e, _ := testEnv(t)
+	if on, set := e.MallocChoice(); !on || set {
+		t.Fatal("default should be on and unset", on, set)
+	}
+	if err := e.SetMallocChoice(false); err != nil {
+		t.Fatal(err)
+	}
+	if on, set := e.MallocChoice(); on || !set {
+		t.Fatal(on, set)
+	}
+	if _, _, err := e.SaveJVM(allOn(8192)); err != nil {
+		t.Fatal(err)
+	}
+	if on, set := e.MallocChoice(); on || !set {
+		t.Fatal("saving memory settings lost the malloc choice", on, set)
+	}
+}

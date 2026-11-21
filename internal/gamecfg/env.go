@@ -187,6 +187,39 @@ type Settings struct {
 	Flags     map[string]bool `json:"flags,omitempty"`
 	SoftMaxMB int             `json:"softMaxMB,omitempty"`
 	Debug     bool            `json:"debug"`
+	// MallocArena: the user's choice for MALLOC_ARENA_MAX=2 in Steam's launch
+	// options (Linux). nil = never chosen, which counts as on.
+	MallocArena *bool `json:"mallocArena,omitempty"`
+}
+
+// MallocChoice returns the remembered MALLOC_ARENA_MAX choice; set is false
+// when the user never saved one.
+func (e Env) MallocChoice() (on, set bool) {
+	s, err := LoadSettings(e.RememberPath())
+	if err != nil || s.MallocArena == nil {
+		return true, false
+	}
+	return *s.MallocArena, true
+}
+
+func (e Env) SetMallocChoice(on bool) error {
+	s, err := LoadSettings(e.RememberPath())
+	if err != nil {
+		return err
+	}
+	s.MallocArena = &on
+	return SaveSettings(e.RememberPath(), s)
+}
+
+// MallocWanted reports whether ZombieBuddy setup should add MALLOC_ARENA_MAX=2
+// (on unless the user switched it off in Settings).
+func MallocWanted() bool {
+	d, err := ConfigDir()
+	if err != nil {
+		return true
+	}
+	on, _ := Env{ConfigDir: d}.MallocChoice()
+	return on
 }
 
 func ConfigDir() (string, error) {
