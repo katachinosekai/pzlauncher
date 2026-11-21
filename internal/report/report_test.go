@@ -53,7 +53,7 @@ func TestSend(t *testing.T) {
 	if err := c.Send(context.Background(), r); err != nil {
 		t.Fatal(err)
 	}
-	if got["doing"] != "loading a save" || got["happened"] != "game froze" || got["version"] != "0.1.8" || got["crash"] != "1" || logs != "zipdata" {
+	if got["app"] != "pzlauncher" || got["doing"] != "loading a save" || got["happened"] != "game froze" || got["version"] != "0.1.8" || got["crash"] != "1" || logs != "zipdata" {
 		t.Fatal(got, logs)
 	}
 	r.Logs = nil

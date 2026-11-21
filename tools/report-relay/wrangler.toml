@@ -3,8 +3,8 @@ main = "worker.js"
 compatibility_date = "2026-11-01"
 
 [vars]
-REPO = "OWNER/REPORTS-REPO"
+REPO = "katachinosekai/bug-reports"
 
 [[kv_namespaces]]
 binding = "RL"
-id = "REPLACE_WITH_KV_NAMESPACE_ID"
+id = "bbe7d8d4a7e74b1793dc105c2939ff45"

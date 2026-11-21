@@ -17,6 +17,8 @@ import (
 
 var RelayURL = ""
 
+const App = "pzlauncher"
+
 const (
 	MaxTextChars = 4000
 	MaxLogsBytes = 20 << 20
@@ -85,7 +87,7 @@ func (c *Client) Send(ctx context.Context, r Report) error {
 	}
 	var body bytes.Buffer
 	mw := multipart.NewWriter(&body)
-	fields := [][2]string{{"doing", r.Doing}, {"happened", r.Happened}, {"version", r.LauncherVersion}, {"os", r.OS}}
+	fields := [][2]string{{"app", App}, {"doing", r.Doing}, {"happened", r.Happened}, {"version", r.LauncherVersion}, {"os", r.OS}}
 	if r.Crash {
 		fields = append(fields, [2]string{"crash", "1"})
 	}

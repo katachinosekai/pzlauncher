@@ -3,6 +3,7 @@ const MAX_LOGS = 20 * 1024 * 1024;
 const MAX_BODY = MAX_LOGS + 256 * 1024;
 const PER_IP_PER_HOUR = 3;
 const PER_DAY = 50;
+const APPS = ["pzlauncher"];
 
 const json = (status, obj) =>
   new Response(JSON.stringify(obj), { status, headers: { "content-type": "application/json" } });
@@ -75,6 +76,8 @@ export default {
     const version = field(form, "version", 40);
     const os = field(form, "os", 40);
     const crash = form.get("crash") === "1";
+    const app = field(form, "app", 40);
+    if (!APPS.includes(app)) return json(400, { error: "unknown app" });
     if (!doing && !happened) return json(400, { error: "empty report" });
 
     let logsPath = "";
@@ -86,17 +89,17 @@ export default {
         return json(400, { error: "logs must be a zip" });
       }
       const id = now.toISOString().replace(/[-:.TZ]/g, "") + "-" + crypto.randomUUID().slice(0, 8);
-      logsPath = "reports/" + day + "/" + id + ".zip";
+      logsPath = "reports/" + app + "/" + day + "/" + id + ".zip";
       await github(env, "PUT", "/contents/" + logsPath, { message: "report " + id, content: base64(bytes) });
     }
 
-    const title = (crash ? "[crash] " : "") + (happened || doing).split("\n")[0].slice(0, 80);
+    const title = "[" + app + "] " + (crash ? "[crash] " : "") + (happened || doing).split("\n")[0].slice(0, 80);
     const body =
-      "Launcher: `" + version + "`  OS: `" + os + "`" + (crash ? "  (offered after a game crash)" : "") +
+      "App: `" + app + "`  Version: `" + version + "`  OS: `" + os + "`" + (crash ? "  (offered after a crash)" : "") +
       "\n\n### What were you doing?\n" + (doing || "_(empty)_") +
       "\n\n### What happened?\n" + (happened || "_(empty)_") +
       "\n\n" + (logsPath ? "Logs: [`" + logsPath + "`](../blob/HEAD/" + logsPath + ")" : "No logs sent.");
-    await github(env, "POST", "/issues", { title, body });
+    await github(env, "POST", "/issues", { title, body, labels: crash ? ["app:" + app, "crash"] : ["app:" + app] });
     return json(200, { ok: true });
   },
 };
