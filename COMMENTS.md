@@ -309,7 +309,11 @@ Play tab: lists sit in a VScroll so opening save details can't raise the window'
 
 ## releases and self-update (2026-11-19)
 
-`scripts/release.sh <version> [--publish] [--prerelease]`: fyne-cross windows + linux with `-app-version`, AppImage via appimagetool (`APPIMAGETOOL`, default ~/.local/share/appimagetool/appimagetool), checks the AppImage's `-version`, writes manifest.json, and with --publish tags v<version>, pushes the tag and creates the GitHub release from `release/notes-v<version>.md`. Output in release/v<version>/ (gitignored).
+Release flow (since 2026-11-21; the old `release.sh <version> [--publish]` form is gone):
+1. `scripts/release.sh build <version>`: clean tree + thirdparty check, fyne-cross windows + linux with `-app-version`, AppImage via appimagetool (`APPIMAGETOOL`, default ~/.local/share/appimagetool/appimagetool), relay URL check, manifest.json + signature (`relsign sign`), writes `BUILT_FROM` (commit), then runs the verify checks. Output in release/v<version>/ (gitignored).
+2. Write `release/notes-v<version>.md`.
+3. `scripts/release.sh publish <version> [--prerelease]`: refuses unless release/v<version> came from `build` (BUILT_FROM), the tree is clean, HEAD == BUILT_FROM and is pushed to origin/master, the tag doesn't exist and the notes exist; re-verifies, tags + pushes the tag, creates the release with exactly the built files (exe, AppImage, manifest.json, .sig, THIRD_PARTY_LICENSES.txt), then downloads it fresh and checks byte-equality, hashes, signature, version, relay URL and (non-prerelease) releases/latest. No separate signature check by another session is needed any more.
+`scripts/release.sh verify <version>`: the checks alone (manifest version + hashes, `relsign verify` against the built-in `update.ReleasePublicKey`, AppImage -version, relay URL in the exe). `go run ./tools/relsign verify [public-key] <file>` checks `<file>.sig` with the launcher's own `update.VerifyManifest`.
 Version: fyne-cross ignores `-ldflags -X`, so `main.version` stays "dev" in packaged builds; main takes `a.Metadata().Version` when the packaged metadata has an ID (fyne package writes it; plain `go build` has none, so dev builds stay "dev" and never self-update). v0.1.0 binaries report "dev" and can't self-update: v0.1.0 users must download once by hand.
 Update check: quiet check 3 s after start (non-dev only); a newer release turns the bottom-bar button into "Update to X". `/releases/latest` skips pre-releases, so test builds are never offered.
 

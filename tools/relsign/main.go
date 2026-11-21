@@ -6,11 +6,13 @@ import (
 	"encoding/base64"
 	"fmt"
 	"os"
+
+	"github.com/katachinosekai/pzlauncher/internal/update"
 )
 
 func main() {
 	if len(os.Args) < 3 {
-		fmt.Fprintln(os.Stderr, "usage: relsign keygen <private-key-file> | relsign sign <private-key-file> <file>")
+		fmt.Fprintln(os.Stderr, "usage: relsign keygen <private-key-file> | relsign sign <private-key-file> <file> | relsign verify [public-key] <file>")
 		os.Exit(2)
 	}
 	switch os.Args[1] {
@@ -46,9 +48,33 @@ func main() {
 		if err := os.WriteFile(os.Args[3]+".sig", []byte(base64.StdEncoding.EncodeToString(sig)+"\n"), 0o644); err != nil {
 			fail(err)
 		}
+	case "verify":
+		pub, file := update.ReleasePublicKey, os.Args[2]
+		if len(os.Args) == 4 {
+			pub, file = os.Args[2], os.Args[3]
+		}
+		data, err := os.ReadFile(file)
+		if err != nil {
+			fail(err)
+		}
+		sig, err := os.ReadFile(file + ".sig")
+		if err != nil {
+			fail(err)
+		}
+		if !verify(pub, data, sig) {
+			fail(fmt.Errorf("%s: signature NOT valid", file))
+		}
+		fmt.Println(file + ": signature valid")
 	default:
 		fail(fmt.Errorf("unknown command %q", os.Args[1]))
 	}
+}
+
+func verify(pub string, data, sig []byte) bool {
+	saved := update.ReleasePublicKey
+	defer func() { update.ReleasePublicKey = saved }()
+	update.ReleasePublicKey = pub
+	return update.VerifyManifest(data, sig)
 }
 
 func trim(b []byte) []byte {
