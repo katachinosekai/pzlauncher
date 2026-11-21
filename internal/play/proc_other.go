@@ -9,9 +9,14 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	"github.com/katachinosekai/pzlauncher/internal/safeurl"
 )
 
 func openURL(u string) error {
+	if err := safeurl.Check(u); err != nil {
+		return err
+	}
 	name := "xdg-open"
 	if runtime.GOOS == "darwin" {
 		name = "open"

@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+
+	"github.com/katachinosekai/pzlauncher/internal/safeurl"
 )
 
 type osSystem struct{}
@@ -50,7 +52,12 @@ func detached(name string, args ...string) error {
 	return nil
 }
 
-func (osSystem) OpenURL(url string) error { return detached("xdg-open", url) }
+func (osSystem) OpenURL(url string) error {
+	if err := safeurl.Check(url); err != nil {
+		return err
+	}
+	return detached("xdg-open", url)
+}
 
 func steamCommand(args ...string) error {
 	if _, err := exec.LookPath("steam"); err != nil {

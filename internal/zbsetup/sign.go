@@ -75,6 +75,8 @@ func ParseZBS(r io.Reader) (ZBS, error) {
 	return z, nil
 }
 
+func Fingerprint(p string) (string, error) { return fileSHA256(p) }
+
 func fileSHA256(p string) (string, error) {
 	f, err := os.Open(p)
 	if err != nil {

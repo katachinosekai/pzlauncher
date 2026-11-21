@@ -9,6 +9,8 @@ import (
 	"unsafe"
 
 	"golang.org/x/sys/windows"
+
+	"github.com/katachinosekai/pzlauncher/internal/safeurl"
 )
 
 type osSystem struct{}
@@ -33,6 +35,9 @@ func (osSystem) Running(names ...string) bool {
 }
 
 func (osSystem) OpenURL(url string) error {
+	if err := safeurl.Check(url); err != nil {
+		return err
+	}
 	cmd := exec.Command("rundll32", "url.dll,FileProtocolHandler", url)
 	if err := cmd.Start(); err != nil {
 		return err

@@ -7,6 +7,8 @@ import (
 	"unsafe"
 
 	"golang.org/x/sys/windows"
+
+	"github.com/katachinosekai/pzlauncher/internal/safeurl"
 )
 
 const createNoWindow = 0x08000000
@@ -17,12 +19,10 @@ func hidden(cmd *exec.Cmd) *exec.Cmd {
 }
 
 func openURL(u string) error {
-	cmd := hidden(exec.Command("rundll32", "url.dll,FileProtocolHandler", u))
-	if err := cmd.Start(); err == nil {
-		go cmd.Wait()
-		return nil
+	if err := safeurl.Check(u); err != nil {
+		return err
 	}
-	cmd = hidden(exec.Command("cmd", "/c", "start", "", u))
+	cmd := hidden(exec.Command("rundll32", "url.dll,FileProtocolHandler", u))
 	if err := cmd.Start(); err != nil {
 		return err
 	}

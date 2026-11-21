@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"image"
-	"net/url"
 	"slices"
 	"sort"
 	"strings"
@@ -671,11 +670,7 @@ func (t *modsTab) showDetails() {
 	buttons.Add(widget.NewButton(favText, func() { t.setFavorite(m.ID, !fav) }))
 	buttons.Add(t.u.modSettingsButton(m.ID, m.Name))
 	if u := m.WorkshopURL(); u != "" {
-		buttons.Add(widget.NewButton("Open Workshop page", func() {
-			if pu, err := url.Parse(u); err == nil {
-				_ = t.u.app.OpenURL(pu)
-			}
-		}))
+		buttons.Add(widget.NewButton("Open Workshop page", func() { t.u.openURL(u) }))
 	}
 
 	desc := widget.NewLabel(modlist.DescriptionText(m.Description))

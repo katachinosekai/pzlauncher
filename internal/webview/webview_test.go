@@ -34,7 +34,7 @@ func TestDecide(t *testing.T) {
 		{"https://www.google.com/recaptcha/api2/anchor", false, Allow},
 		{"about:blank", false, Allow},
 		{"http://steamcommunity.com/", false, Block},
-		{"http://steamcommunity.com/", true, External},
+		{"http://steamcommunity.com/", true, Block},
 		{"https://steamcommunity.com:8443/", true, External},
 		{"https://user@steamcommunity.com/", false, Block},
 		{"https://steamcommunity.com.evil.example/", false, Block},

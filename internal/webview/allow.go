@@ -87,7 +87,7 @@ func Decide(raw string, userGesture bool) Action {
 				return Allow
 			}
 		}
-	case "http", "steam", "mailto":
+	case "steam":
 	default:
 		return Block
 	}

@@ -195,6 +195,7 @@ func (u *ui) zombieBuddyTab() fyne.CanvasObject {
 	picker := widget.NewSelect(nil, nil)
 	picker.PlaceHolder = "Choose a version"
 	var choices []func() (string, string, error)
+	var labels []string
 	var refresh func()
 	updateBtn := widget.NewButton("Update", nil)
 	installBtn := widget.NewButton("Install selected version", nil)
@@ -254,6 +255,7 @@ func (u *ui) zombieBuddyTab() fyne.CanvasObject {
 			})
 		}
 		picker.Options = opts
+		labels = opts
 		picker.ClearSelected()
 		for i, v := range vers {
 			if s.installed != "" && zbsetup.Compare(v, s.installed) == 0 {
@@ -372,7 +374,52 @@ func (u *ui) zombieBuddyTab() fyne.CanvasObject {
 		}()
 	}
 
-	installJar := func(get func() (string, string, error)) {
+	replaceJar := func(src, ver string) {
+		env := zbsetup.JarEnv{GameDir: cur.gameDir, GOOS: runtime.GOOS, Running: install.GameRunning}
+		done := func(r zbsetup.ReplaceResult, err error) {
+			if err != nil {
+				output.SetText("")
+				dialog.ShowError(err, u.win)
+				return
+			}
+			var msg string
+			switch {
+			case r.Unchanged:
+				msg = "ZombieBuddy " + r.NewVersion + " is already installed."
+			case r.Staged:
+				msg = "ZombieBuddy " + r.NewVersion + " saved as " + r.Jar + "; zbNative swaps it in on the next game start.\n" + zbsetup.ReapproveNote
+			default:
+				msg = fmt.Sprintf("ZombieBuddy %s -> %s installed in %s.", r.OldVersion, r.NewVersion, cur.gameDir)
+				if r.Backup != "" {
+					msg += "\nOld jar kept as " + r.Backup
+				}
+				msg += "\n" + zbsetup.ReapproveNote
+			}
+			output.SetText(msg)
+			refresh()
+		}
+		if install.GameRunning() {
+			if runtime.GOOS != "windows" {
+				dialog.ShowError(zbsetup.ErrGameRunning, u.win)
+				output.SetText("")
+				return
+			}
+			dialog.ShowConfirm("Project Zomboid is running",
+				"ZombieBuddy.jar can't be replaced while the game runs. Save "+ver+" as ZombieBuddy.jar.new instead? ZombieBuddy's zbNative swaps it in on the next start.",
+				func(ok bool) {
+					if ok {
+						done(zbsetup.StageNew(env, src))
+					} else {
+						output.SetText("")
+					}
+				}, u.win)
+			return
+		}
+		done(zbsetup.ReplaceJar(env, src))
+	}
+
+	installJar := func(i int) {
+		get, label := choices[i], labels[i]
 		busy(true)
 		output.SetText("Preparing...")
 		go func() {
@@ -388,47 +435,21 @@ func (u *ui) zombieBuddyTab() fyne.CanvasObject {
 					dialog.ShowError(errors.New("game folder not found"), u.win)
 					return
 				}
-				env := zbsetup.JarEnv{GameDir: cur.gameDir, GOOS: runtime.GOOS, Running: install.GameRunning}
-				done := func(r zbsetup.ReplaceResult, err error) {
-					if err != nil {
-						output.SetText("")
-						dialog.ShowError(err, u.win)
-						return
-					}
-					var msg string
-					switch {
-					case r.Unchanged:
-						msg = "ZombieBuddy " + r.NewVersion + " is already installed."
-					case r.Staged:
-						msg = "ZombieBuddy " + r.NewVersion + " saved as " + r.Jar + "; zbNative swaps it in on the next game start.\n" + zbsetup.ReapproveNote
-					default:
-						msg = fmt.Sprintf("ZombieBuddy %s -> %s installed in %s.", r.OldVersion, r.NewVersion, cur.gameDir)
-						if r.Backup != "" {
-							msg += "\nOld jar kept as " + r.Backup
-						}
-						msg += "\n" + zbsetup.ReapproveNote
-					}
-					output.SetText(msg)
-					refresh()
-				}
-				if install.GameRunning() {
-					if runtime.GOOS != "windows" {
-						dialog.ShowError(zbsetup.ErrGameRunning, u.win)
-						output.SetText("")
-						return
-					}
-					dialog.ShowConfirm("Project Zomboid is running",
-						"ZombieBuddy.jar can't be replaced while the game runs. Save "+ver+" as ZombieBuddy.jar.new instead? ZombieBuddy's zbNative swaps it in on the next start.",
-						func(ok bool) {
-							if ok {
-								done(zbsetup.StageNew(env, src))
-							} else {
-								output.SetText("")
-							}
-						}, u.win)
+				sum, err := zbsetup.Fingerprint(src)
+				if err != nil {
+					output.SetText("")
+					dialog.ShowError(err, u.win)
 					return
 				}
-				done(zbsetup.ReplaceJar(env, src))
+				dialog.ShowConfirm("Install ZombieBuddy "+ver+"?",
+					"Source: "+label+"\nFile: "+src+"\nSHA-256: "+sum+"\n\nZombieBuddy runs inside the game with full access to your PC. For a jar from anywhere but the Workshop or the official GitHub releases, compare this SHA-256 with the one its author publishes.",
+					func(ok bool) {
+						if !ok {
+							output.SetText("")
+							return
+						}
+						replaceJar(src, ver)
+					}, u.win)
 			})
 		}()
 	}
@@ -439,7 +460,7 @@ func (u *ui) zombieBuddyTab() fyne.CanvasObject {
 			dialog.ShowInformation("ZombieBuddy", "Choose a version first.", u.win)
 			return
 		}
-		installJar(choices[i])
+		installJar(i)
 	}
 	updateBtn.OnTapped = func() {
 		if len(choices) == 0 {
@@ -447,13 +468,13 @@ func (u *ui) zombieBuddyTab() fyne.CanvasObject {
 		}
 		if cur.custom != "" {
 			if cur.customVer != "" {
-				installJar(choices[0])
+				installJar(0)
 			}
 			return
 		}
 		best := cur.best()
 		if cur.workshop != "" && zbsetup.Compare(cur.workshop, best) >= 0 {
-			installJar(choices[0])
+			installJar(0)
 			return
 		}
 		off := 0
@@ -462,7 +483,7 @@ func (u *ui) zombieBuddyTab() fyne.CanvasObject {
 		}
 		for i, r := range cur.rels {
 			if r.Version == best {
-				installJar(choices[off+i])
+				installJar(off + i)
 				return
 			}
 		}
@@ -492,8 +513,13 @@ func (u *ui) zombieBuddyTab() fyne.CanvasObject {
 			dialog.ShowError(fmt.Errorf("%s: %w", p, err), u.win)
 			return
 		}
+		sum, err := zbsetup.Fingerprint(p)
+		if err != nil {
+			dialog.ShowError(fmt.Errorf("%s: %w", p, err), u.win)
+			return
+		}
 		dialog.ShowConfirm("Use a custom ZombieBuddy jar?",
-			"ZombieBuddy "+info.Version+" from\n"+p+"\n\nThis is not an official ZombieBuddy release. ZombieBuddy runs inside the game with full access to your PC: only use builds you trust (your own or from someone you know).\n\nWhile it is set, Update and the pack install use this jar instead of the Workshop or GitHub copies.",
+			"ZombieBuddy "+info.Version+" from\n"+p+"\nSHA-256: "+sum+"\n\nThis is not an official ZombieBuddy release. ZombieBuddy runs inside the game with full access to your PC: only use builds you trust (your own or from someone you know).\n\nWhile it is set, Update and the pack install use this jar instead of the Workshop or GitHub copies.",
 			func(ok bool) {
 				if ok {
 					setCustom(p)
