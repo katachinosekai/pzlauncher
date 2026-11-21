@@ -9,6 +9,7 @@ import (
 )
 
 const prefCollection = "workshop.collection"
+const prefRecentRange = "workshop.recentRange"
 
 func (u *ui) modsTab() fyne.CanvasObject {
 	return container.NewAppTabs(

@@ -152,13 +152,14 @@ func (u *ui) workshopTab() fyne.CanvasObject {
 
 	tabs := container.NewAppTabs(
 		container.NewTabItem("My subscriptions", widget.NewLabel("")),
+		container.NewTabItem("Recently Updated", widget.NewLabel("")),
 		container.NewTabItem("My Subscribed Collection", widget.NewLabel("")),
 		container.NewTabItemWithIcon("", theme.SearchIcon(), widget.NewLabel("")),
 		container.NewTabItem("Popular / Recent Mods", widget.NewLabel("")),
 		container.NewTabItem("Search for Collection", widget.NewLabel("")),
 	)
-	const searchIdx = 2
-	builders := []func() (fyne.CanvasObject, func()){b.subsTab, b.collectionTab, b.searchTab, b.popularTab, b.collectionsTab}
+	const searchIdx = 3
+	builders := []func() (fyne.CanvasObject, func()){b.subsTab, b.recentTab, b.collectionTab, b.searchTab, b.popularTab, b.collectionsTab}
 	var viewing *container.TabItem
 	b.openCollection = func(id, title string) {
 		view, load := b.collectionView(id)
@@ -827,6 +828,9 @@ func subItems(subs []workshop.Sub, det map[string]workshop.Details, local map[st
 			desc = l.Description
 		}
 		items = append(items, wsItem{ID: s.ID, Title: title, Info: info, Detail: strings.Join(detail, "  ·  "), Tags: d.Tags, ModIDs: l.ModIDs, Requires: l.Requires, Desc: desc, State: subStateLabel(s.State), Subscribed: true, Installed: s.State == workshop.SubInstalled, Preview: preview, sub: s.State})
+		if !updated.IsZero() {
+			items[len(items)-1].updated = updated.Unix()
+		}
 	}
 	sort.SliceStable(items, func(i, j int) bool {
 		a, b := items[i], items[j]
@@ -841,6 +845,48 @@ func subItems(subs []workshop.Sub, det map[string]workshop.Details, local map[st
 	return items
 }
 
+type subsData struct {
+	subs   []workshop.Sub
+	err    error
+	items  []wsItem
+	derr   error
+	active map[string]bool
+}
+
+func (b *wsBrowser) readSubs() subsData {
+	var out subsData
+	out.subs, out.err = b.deps.subs()
+	var det map[string]workshop.Details
+	if out.err == nil && len(out.subs) > 0 {
+		ids := make([]string, len(out.subs))
+		for i, s := range out.subs {
+			ids[i] = s.ID
+		}
+		det, out.derr = b.deps.details(b.u.ctx, ids)
+	}
+	local := map[string]workshop.LocalItem{}
+	var uploads map[string]string
+	if b.deps.uploads != nil {
+		uploads = b.deps.uploads()
+	}
+	for _, s := range out.subs {
+		l := b.deps.local(s.Dir)
+		if l.Image == "" {
+			l.Image = uploads[s.ID]
+		}
+		local[s.ID] = l
+	}
+	if b.deps.active != nil {
+		out.active = b.deps.active()
+	}
+	if out.err == nil {
+		out.items = subItems(out.subs, det, local, out.derr == nil)
+	}
+	return out
+}
+
+const subsReadError = "Could not read Steam's Workshop file (appworkshop_108600.acf): "
+
 func (b *wsBrowser) subsTab() (fyne.CanvasObject, func()) {
 	var items []wsItem
 	list := b.itemList(&items, nil)
@@ -851,50 +897,25 @@ func (b *wsBrowser) subsTab() (fyne.CanvasObject, func()) {
 		refresh.Disable()
 		summary.SetText("Reading your Steam Workshop subscriptions...")
 		go func() {
-			subs, err := b.deps.subs()
-			var det map[string]workshop.Details
-			var derr error
-			if err == nil && len(subs) > 0 {
-				ids := make([]string, len(subs))
-				for i, s := range subs {
-					ids[i] = s.ID
-				}
-				det, derr = b.deps.details(b.u.ctx, ids)
-			}
-			local := map[string]workshop.LocalItem{}
-			var uploads map[string]string
-			if b.deps.uploads != nil {
-				uploads = b.deps.uploads()
-			}
-			for _, s := range subs {
-				l := b.deps.local(s.Dir)
-				if l.Image == "" {
-					l.Image = uploads[s.ID]
-				}
-				local[s.ID] = l
-			}
-			var active map[string]bool
-			if b.deps.active != nil {
-				active = b.deps.active()
-			}
+			d := b.readSubs()
 			fyne.Do(func() {
-				b.active = active
+				b.active = d.active
 				refresh.Enable()
-				if err != nil {
-					summary.SetText("Could not read Steam's Workshop file (appworkshop_108600.acf): " + err.Error())
+				if d.err != nil {
+					summary.SetText(subsReadError + d.err.Error())
 					items = nil
 					b.refreshList(list)
 					return
 				}
 				counts := map[workshop.SubState]int{}
-				for _, s := range subs {
+				for _, s := range d.subs {
 					counts[s.State]++
 				}
-				items = subItems(subs, det, local, derr == nil)
+				items = d.items
 				b.refreshList(list)
-				msg := fmt.Sprintf("%d subscribed: %d installed, %d update pending, %d downloading or queued.", len(subs), counts[workshop.SubInstalled], counts[workshop.SubNeedsUpdate], counts[workshop.SubDownloading])
-				if derr != nil {
-					msg += " Titles unavailable: " + derr.Error()
+				msg := fmt.Sprintf("%d subscribed: %d installed, %d update pending, %d downloading or queued.", len(d.subs), counts[workshop.SubInstalled], counts[workshop.SubNeedsUpdate], counts[workshop.SubDownloading])
+				if d.derr != nil {
+					msg += " Titles unavailable: " + d.derr.Error()
 				}
 				summary.SetText(msg)
 			})
@@ -902,6 +923,101 @@ func (b *wsBrowser) subsTab() (fyne.CanvasObject, func()) {
 	}
 	refresh = widget.NewButtonWithIcon("Refresh", theme.ViewRefreshIcon(), load)
 	top := container.NewBorder(nil, nil, nil, refresh, summary)
+	return container.NewBorder(top, nil, nil, nil, list), load
+}
+
+type recentRange struct {
+	label string
+	days  int
+	words string
+}
+
+var recentRanges = []recentRange{{"Today", 1, "today"}, {"This Week", 7, "this week"}, {"This Month", 30, "this month"}}
+
+func recentItems(all []wsItem, now time.Time, days int) []wsItem {
+	cut := now.Add(-time.Duration(days) * 24 * time.Hour).Unix()
+	var out []wsItem
+	for _, it := range all {
+		if it.updated > cut {
+			out = append(out, it)
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].updated > out[j].updated })
+	return out
+}
+
+func recentSummary(n, total int, r recentRange) string {
+	if n == 0 {
+		return fmt.Sprintf("None of your %d subscriptions were updated %s.", total, r.words)
+	}
+	verb := "were"
+	if n == 1 {
+		verb = "was"
+	}
+	return fmt.Sprintf("%d of your %d subscriptions %s updated %s.", n, total, verb, r.words)
+}
+
+func (b *wsBrowser) recentTab() (fyne.CanvasObject, func()) {
+	var items, all []wsItem
+	total := -1
+	list := b.itemList(&items, nil)
+	summary := widget.NewLabel("")
+	summary.Wrapping = fyne.TextWrapWord
+	labels := make([]string, len(recentRanges))
+	for i, r := range recentRanges {
+		labels[i] = r.label
+	}
+	prefs := b.u.app.Preferences()
+	radio := widget.NewRadioGroup(labels, nil)
+	radio.Horizontal = true
+	radio.Required = true
+	radio.SetSelected(prefs.StringWithFallback(prefRecentRange, recentRanges[1].label))
+	if radio.Selected == "" {
+		radio.SetSelected(recentRanges[1].label)
+	}
+	show := func() {
+		if total < 0 {
+			return
+		}
+		r := recentRanges[1]
+		for _, c := range recentRanges {
+			if c.label == radio.Selected {
+				r = c
+			}
+		}
+		items = recentItems(all, time.Now(), r.days)
+		b.refreshList(list)
+		summary.SetText(recentSummary(len(items), total, r))
+	}
+	radio.OnChanged = func(string) {
+		prefs.SetString(prefRecentRange, radio.Selected)
+		show()
+	}
+	var refresh *widget.Button
+	load := func() {
+		refresh.Disable()
+		summary.SetText("Reading your Steam Workshop subscriptions...")
+		go func() {
+			d := b.readSubs()
+			fyne.Do(func() {
+				b.active = d.active
+				refresh.Enable()
+				if d.err != nil {
+					summary.SetText(subsReadError + d.err.Error())
+					all, items, total = nil, nil, -1
+					b.refreshList(list)
+					return
+				}
+				all, total = d.items, len(d.subs)
+				show()
+				if d.derr != nil {
+					summary.SetText(summary.Text + " Steam details unavailable (" + d.derr.Error() + "): only private mods' local dates are known.")
+				}
+			})
+		}()
+	}
+	refresh = widget.NewButtonWithIcon("Refresh", theme.ViewRefreshIcon(), load)
+	top := container.NewVBox(container.NewBorder(nil, nil, nil, refresh, radio), summary)
 	return container.NewBorder(top, nil, nil, nil, list), load
 }
 

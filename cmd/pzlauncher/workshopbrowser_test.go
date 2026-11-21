@@ -94,7 +94,7 @@ func TestScreenshotsWorkshop(t *testing.T) {
 	saved := workshopDeps
 	workshopDeps = fakeWorkshopDeps()
 	defer func() { workshopDeps = saved }()
-	shootWorkshop(t, dir, "", 1500*time.Millisecond, []int{0, 1, 2, 3, 4}, nil)
+	shootWorkshop(t, dir, "", 1500*time.Millisecond, []int{0, 1, 2, 3, 4, 5}, nil)
 }
 
 func TestScreenshotsWorkshopReal(t *testing.T) {
@@ -192,7 +192,7 @@ func shootWorkshop(t *testing.T, dir, suffix string, wait time.Duration, tabs []
 		png.Encode(f, w.Canvas().Capture())
 		f.Close()
 	}
-	names := []string{"Workshop-MySubscriptions", "Workshop-MySubscribedCollection", "Workshop-Search", "Workshop-PopularRecentMods", "Workshop-SearchForCollection"}
+	names := []string{"Workshop-MySubscriptions", "Workshop-RecentlyUpdated", "Workshop-MySubscribedCollection", "Workshop-Search", "Workshop-PopularRecentMods", "Workshop-SearchForCollection"}
 	for _, i := range tabs {
 		inner.SelectIndex(i)
 		time.Sleep(wait)
@@ -311,5 +311,32 @@ func TestUpdatedAgo(t *testing.T) {
 		if got := updatedAgo(now.AddDate(0, 0, -days), now); got != want {
 			t.Errorf("%d days: got %q want %q", days, got, want)
 		}
+	}
+}
+
+func TestRecentItems(t *testing.T) {
+	now := time.Date(2026, 11, 21, 12, 0, 0, 0, time.UTC)
+	at := func(h int) int64 { return now.Add(-time.Duration(h) * time.Hour).Unix() }
+	all := []wsItem{{ID: "old", updated: at(24 * 40)}, {ID: "day", updated: at(2)}, {ID: "week", updated: at(24 * 3)}, {ID: "none"}, {ID: "month", updated: at(24 * 20)}, {ID: "edge", updated: at(24)}}
+	ids := func(items []wsItem) string {
+		var out []string
+		for _, it := range items {
+			out = append(out, it.ID)
+		}
+		return strings.Join(out, ",")
+	}
+	for days, want := range map[int]string{1: "day", 7: "day,edge,week", 30: "day,edge,week,month"} {
+		if got := ids(recentItems(all, now, days)); got != want {
+			t.Errorf("%d days: got %s want %s", days, got, want)
+		}
+	}
+	if got := recentSummary(0, 12, recentRanges[0]); got != "None of your 12 subscriptions were updated today." {
+		t.Error(got)
+	}
+	if got := recentSummary(1, 12, recentRanges[1]); got != "1 of your 12 subscriptions was updated this week." {
+		t.Error(got)
+	}
+	if got := recentSummary(4, 12, recentRanges[2]); got != "4 of your 12 subscriptions were updated this month." {
+		t.Error(got)
 	}
 }
