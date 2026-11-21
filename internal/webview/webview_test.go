@@ -286,6 +286,85 @@ func TestHelperSubscribe(t *testing.T) {
 	}
 }
 
+func TestVoteProtocol(t *testing.T) {
+	for _, c := range []struct {
+		cmd  Command
+		want bool
+	}{
+		{Command{Op: OpVote, ID: "12"}, true},
+		{Command{Op: OpVote, ID: "12", Vote: VoteUp}, true},
+		{Command{Op: OpVote, ID: "12", Vote: VoteDown}, true},
+		{Command{Op: OpVote, ID: "12", Vote: VoteNone}, false}, // "none" is a result, not a command
+		{Command{Op: OpVote, ID: "12", Vote: "sideways"}, false},
+		{Command{Op: OpVote, ID: "1;2", Vote: VoteUp}, false},
+	} {
+		if got := c.cmd.Valid(); got != c.want {
+			t.Errorf("%+v valid=%v want %v", c.cmd, got, c.want)
+		}
+	}
+	m, ok := ParseScriptMessage(`{"kind":"result","id":"9","result":"done","vote":"down"}`)
+	if !ok || m.Vote != VoteDown {
+		t.Fatalf("%+v", m)
+	}
+	if _, ok := ParseScriptMessage(`{"kind":"result","id":"9","result":"done","vote":"maybe"}`); ok {
+		t.Fatal("unknown vote value accepted")
+	}
+	for _, want := range []string{"", VoteUp, VoteDown} {
+		js := VoteScript("12", want, "p")
+		if strings.Count(js, "(") != strings.Count(js, ")") || strings.Count(js, "{") != strings.Count(js, "}") {
+			t.Fatalf("unbalanced script: %s", js)
+		}
+		if !strings.Contains(js, `"want":"`+want+`"`) || !strings.Contains(js, "VoteUpBtn") || !strings.Contains(js, "VoteDownBtn") {
+			t.Fatalf("script for %q: %s", want, js)
+		}
+	}
+}
+
+func TestHelperVote(t *testing.T) {
+	var out bytes.Buffer
+	h := NewHelper(&out, nil)
+	h.afterFunc = func(time.Duration, func()) func() { return func() {} }
+	e := &fakeEngine{}
+	h.Start(e)
+	e.take()
+	// a read, a vote and a subscribe share the one job queue
+	h.Apply(Command{Op: OpVote, ID: "1", Req: 1})
+	h.Apply(Command{Op: OpVote, ID: "2", Req: 2, Vote: VoteUp})
+	h.Apply(Command{Op: OpSubscribe, ID: "3", Req: 3})
+	if l := e.take(); !slices.Equal(l, []string{"load " + ItemURL("1")}) {
+		t.Fatal(l)
+	}
+	h.ScriptMessage(page(true, "user", "1"))
+	if l := e.take(); len(l) != 1 || !strings.HasPrefix(l[0], "eval (function(a){func") {
+		t.Fatal(l)
+	}
+	h.ScriptMessage(`{"kind":"result","id":"1","result":"done","vote":"none"}`)
+	h.ScriptMessage(page(true, "user", "2"))
+	e.take()
+	h.ScriptMessage(`{"kind":"result","id":"2","result":"done","vote":"up"}`)
+	h.ScriptMessage(page(true, "user", "3"))
+	e.take()
+	h.ScriptMessage(`{"kind":"result","id":"3","result":"done"}`)
+	var got []string
+	for _, ev := range events(&out) {
+		if ev.Event == EvSession {
+			continue
+		}
+		got = append(got, fmt.Sprintf("%s %d %s %s", ev.Event, ev.Req, ev.Result, ev.Vote))
+	}
+	want := []string{"voteresult 1 done none", "voteresult 2 done up", "subresult 3 done "}
+	if !slices.Equal(got, want) {
+		t.Fatalf("got %q want %q", got, want)
+	}
+	// signed out while voting: the result says so and the session flips
+	h.Apply(Command{Op: OpVote, ID: "4", Req: 4, Vote: VoteDown})
+	h.ScriptMessage(`{"kind":"result","id":"4","result":"not_signed_in"}`)
+	evs := events(&out)
+	if len(evs) != 2 || evs[0].Event != EvVoteResult || evs[0].Result != ResultNotSignedIn || evs[1].Event != EvSession || evs[1].SignedIn {
+		t.Fatalf("%+v", evs)
+	}
+}
+
 func TestMain(m *testing.M) {
 	switch os.Getenv("PZL_FAKE_HELPER") {
 	case "ok":

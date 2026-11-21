@@ -15,6 +15,7 @@ const (
 	OpSignOut      = "signout"
 	OpState        = "state"
 	OpSubscribe    = "subscribe"
+	OpVote         = "vote"
 	OpQuit         = "quit"
 )
 
@@ -31,6 +32,15 @@ const (
 	EvQR           = "qr"
 	EvSignInClosed = "signinclosed"
 	EvSubResult    = "subresult"
+	EvVoteResult   = "voteresult"
+)
+
+// Steam Workshop votes (thumbs up / down). Steam has no "remove vote":
+// clicking the vote you already gave does nothing.
+const (
+	VoteUp   = "up"
+	VoteDown = "down"
+	VoteNone = "none" // read result only: no vote given
 )
 
 const (
@@ -56,6 +66,7 @@ type Command struct {
 	Req         int    `json:"req,omitempty"`
 	Unsubscribe bool   `json:"unsubscribe,omitempty"`
 	Deps        bool   `json:"deps,omitempty"`
+	Vote        string `json:"vote,omitempty"` // OpVote: "up", "down", or "" to only read the current vote
 }
 
 type Event struct {
@@ -69,6 +80,7 @@ type Event struct {
 	Image     string `json:"image,omitempty"`
 	Challenge string `json:"challenge,omitempty"`
 	Error     string `json:"error,omitempty"`
+	Vote      string `json:"vote,omitempty"` // EvVoteResult: "up", "down" or "none"
 }
 
 const maxLine = 1 << 20
@@ -86,6 +98,8 @@ func (c Command) Valid() bool {
 		return c.Mode == ModeWindow || c.Mode == ModeQR
 	case OpSubscribe:
 		return digits.MatchString(c.ID)
+	case OpVote:
+		return digits.MatchString(c.ID) && (c.Vote == "" || c.Vote == VoteUp || c.Vote == VoteDown)
 	}
 	return false
 }
@@ -150,6 +164,7 @@ type ScriptMsg struct {
 	Result    string `json:"result"`
 	Error     string `json:"error"`
 	Diag      string `json:"diag"`
+	Vote      string `json:"vote"`
 }
 
 const maxQRImage = 512 << 10
@@ -175,7 +190,10 @@ func ParseScriptMessage(s string) (ScriptMsg, bool) {
 	case MsgResult:
 		switch m.Result {
 		case ResultDone, ResultAlready, ResultNotSignedIn, ResultFailed:
-			return m, digits.MatchString(m.ID)
+			switch m.Vote {
+			case "", VoteUp, VoteDown, VoteNone:
+				return m, digits.MatchString(m.ID)
+			}
 		}
 	}
 	return ScriptMsg{}, false
@@ -248,6 +266,34 @@ func SubscribeScript(id string, unsubscribe, deps bool, post string) string {
 		`if(all&&ok){(a.deps?all:ok).click();}else{var c=d.querySelector('.newmodal_content');clearInterval(iv);` +
 		`post({result:'failed',error:c?c.textContent:'Steam showed an error'});if(ok)ok.click();return;}}` +
 		`if(t>=50){clearInterval(iv);post({result:'failed',error:'Steam did not confirm the change'});}` +
+		`},300);` +
+		`})(` + string(b) + `);`
+}
+
+// VoteScript reads the signed-in user's vote on the item page (want "") or
+// clicks Steam's own vote-up / vote-down button and waits until the page shows
+// it. Steam marks the given vote with the "toggled" class on VoteUpBtn /
+// VoteDownBtn and ignores clicks on the vote already given.
+func VoteScript(id, want, post string) string {
+	b, _ := json.Marshal(struct {
+		ID   string `json:"id"`
+		Want string `json:"want"`
+	}{id, want})
+	return `(function(a){` +
+		`function post(o){o.kind='result';o.id=a.id;try{` + post + `(JSON.stringify(o));}catch(e){}}` +
+		`var sid=window.g_steamID;if(!(typeof sid==='string'&&sid.length>0)){post({result:'not_signed_in'});return;}` +
+		`var up=document.getElementById('VoteUpBtn');var dn=document.getElementById('VoteDownBtn');` +
+		`if(!up||!dn){post({result:'failed',error:'Steam shows no vote buttons for this item'});return;}` +
+		`function st(){return up.classList.contains('toggled')?'up':(dn.classList.contains('toggled')?'down':'none');}` +
+		`if(!a.want){post({result:'done',vote:st()});return;}` +
+		`if(st()===a.want){post({result:'already',vote:st()});return;}` +
+		`(a.want==='up'?up:dn).click();var t=0;var iv=setInterval(function(){t++;` +
+		`if(st()===a.want){clearInterval(iv);post({result:'done',vote:st()});return;}` +
+		`var d=document.querySelector('.newmodal');` +
+		`if(d&&!d.__pzl){d.__pzl=1;var c=d.querySelector('.newmodal_content');clearInterval(iv);` +
+		`post({result:'failed',vote:st(),error:c?c.textContent:'Steam showed an error'});` +
+		`var ok=d.querySelector('.btn_green_steamui,.btn_grey_steamui,.newmodal_close');if(ok)ok.click();return;}` +
+		`if(t>=50){clearInterval(iv);post({result:'failed',vote:st(),error:'Steam did not confirm the vote'});}` +
 		`},300);` +
 		`})(` + string(b) + `);`
 }

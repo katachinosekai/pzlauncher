@@ -22,6 +22,7 @@ const (
 type wsPending struct {
 	id    string
 	unsub bool
+	vote  bool // a vote read / cast, not a subscription change
 	cb    func(webview.Event)
 }
 
@@ -116,6 +117,7 @@ func (s *wsSession) onEvent(e webview.Event) {
 			}
 		}
 		s.refresh()
+		s.b.sessionChanged(e.SignedIn)
 	case webview.EvQR:
 		if s.qrImg == nil || e.Image == "" {
 			return
@@ -145,6 +147,35 @@ func (s *wsSession) onEvent(e webview.Event) {
 			return
 		}
 		p.cb(e)
+	case webview.EvVoteResult:
+		p, ok := s.reqs[e.Req]
+		if !ok {
+			return
+		}
+		delete(s.reqs, e.Req)
+		if e.Result == webview.ResultNotSignedIn {
+			s.known, s.signedIn = true, false
+			s.refresh()
+		}
+		p.cb(e)
+	}
+}
+
+// vote reads (want "") or casts a thumbs up / down through the signed-in
+// hidden browser. Signed out or without the built-in browser it answers at
+// once; it never opens a sign-in by itself.
+func (s *wsSession) vote(id, want string, cb func(webview.Event)) {
+	s.ensure()
+	if s.fallback || !s.known || !s.signedIn {
+		cb(webview.Event{Event: webview.EvVoteResult, ID: id, Result: webview.ResultNotSignedIn})
+		return
+	}
+	s.nextReq++
+	req := s.nextReq
+	s.reqs[req] = wsPending{id: id, vote: true, cb: cb}
+	if !s.send(webview.Command{Op: webview.OpVote, ID: id, Req: req, Vote: want}) {
+		delete(s.reqs, req)
+		cb(webview.Event{Event: webview.EvVoteResult, ID: id, Result: webview.ResultFailed, Error: "the built-in browser is unavailable"})
 	}
 }
 
@@ -159,6 +190,10 @@ func (s *wsSession) onFallback(err error) {
 	pend := s.reqs
 	s.reqs = map[int]wsPending{}
 	for _, p := range pend {
+		if p.vote {
+			p.cb(webview.Event{Event: webview.EvVoteResult, ID: p.id, Result: webview.ResultFailed, Error: "the built-in browser is unavailable"})
+			continue
+		}
 		s.openExternal(p)
 	}
 	w := s.waiting

@@ -99,6 +99,7 @@ type wsItem struct {
 	Installed  bool
 	Preview    string
 	Collection bool
+	CanVote    bool     // subscribed mod: thumbs up / down in the expanded row
 	Cols       []string // search tabs: column values (see wsColsLayout)
 	subs       int64
 	stars      int
@@ -127,6 +128,10 @@ type wsBrowser struct {
 
 	busy     map[string]bool
 	subState map[string]bool
+	votes    map[string]string // Steam vote per mod: up / down / none ("" = not read yet)
+	voteBusy map[string]bool
+	voteErr  map[string]string
+	voteSend func(id, want string, cb func(webview.Event)) // tests; nil = the Steam session
 	watchers []func()
 	active   map[string]bool
 	fixes    map[*widget.List]func()
@@ -292,6 +297,7 @@ type wsRow struct {
 	ext         *widget.Button
 	toggle      *widget.Button
 	details     *widget.Label
+	vote        *voteBar
 	detBox      fyne.CanvasObject
 	body        *fyne.Container
 	text        *fyne.Container
@@ -572,7 +578,8 @@ func newWSRow() *wsRow {
 	r.card = newTapCard(container.NewStack(bg, inner))
 	detScroll := container.NewVScroll(r.details)
 	detScroll.SetMinSize(fyne.NewSize(0, wsDetailsH))
-	r.detBox = container.New(layout.NewCustomPaddedLayout(0, 0, 16, 0), detScroll)
+	r.vote = newVoteBar()
+	r.detBox = container.New(layout.NewCustomPaddedLayout(0, 0, 16, 0), container.NewBorder(r.vote.box, nil, nil, nil, detScroll))
 	r.detBox.Hide()
 	r.body = container.NewVBox(r.card, r.detBox)
 	r.content = container.New(layout.NewCustomPaddedLayout(3, 3, 0, 0), r.body)
@@ -727,6 +734,14 @@ func (b *wsBrowser) itemList(items *[]wsItem, nearEnd func()) *widget.List {
 			if open {
 				r.toggle.SetIcon(theme.MenuDropUpIcon())
 				r.details.SetText(wsDetailsText(it, b.active))
+				if it.CanVote {
+					id, title := it.ID, it.displayTitle()
+					r.vote.show(b.voteFor(id),
+						func() { b.castVote(id, webview.VoteUp, title) },
+						func() { b.castVote(id, webview.VoteDown, title) })
+				} else {
+					r.vote.box.Hide()
+				}
 				r.detBox.Show()
 			} else {
 				r.toggle.SetIcon(theme.MenuDropDownIcon())
@@ -1255,7 +1270,7 @@ func subItems(subs []workshop.Sub, det map[string]workshop.Details, local map[st
 		if desc == "" {
 			desc = l.Description
 		}
-		items = append(items, wsItem{ID: s.ID, Title: title, Info: info, Detail: strings.Join(detail, "  ·  "), Tags: d.Tags, ModIDs: l.ModIDs, Requires: l.Requires, Desc: desc, State: subStateLabel(s.State), Subscribed: true, Installed: s.State == workshop.SubInstalled, Preview: preview, sub: s.State})
+		items = append(items, wsItem{ID: s.ID, Title: title, Info: info, Detail: strings.Join(detail, "  ·  "), Tags: d.Tags, ModIDs: l.ModIDs, Requires: l.Requires, Desc: desc, State: subStateLabel(s.State), Subscribed: true, Installed: s.State == workshop.SubInstalled, Preview: preview, sub: s.State, CanVote: true})
 		if !updated.IsZero() {
 			items[len(items)-1].updated = updated.Unix()
 		}

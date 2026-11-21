@@ -131,7 +131,7 @@ func (h *Helper) Apply(c Command) {
 		} else {
 			h.emitSession()
 		}
-	case OpSubscribe:
+	case OpSubscribe, OpVote:
 		h.jobs = append(h.jobs, c)
 		h.next()
 	case OpQuit:
@@ -158,7 +158,7 @@ func (h *Helper) next() {
 	h.stopTimer = h.afterFunc(h.timeout, func() {
 		h.eng.Post(func() {
 			if h.cur != nil && h.gen == gen {
-				h.finish(ResultFailed, "Steam did not answer in time")
+				h.finish(ResultFailed, "Steam did not answer in time", "")
 			}
 		})
 	})
@@ -172,14 +172,18 @@ func (h *Helper) stop() {
 	}
 }
 
-func (h *Helper) finish(result, errText string) {
+func (h *Helper) finish(result, errText, vote string) {
 	c := h.cur
 	if c == nil {
 		return
 	}
 	h.stop()
 	h.cur = nil
-	h.Emit(Event{Event: EvSubResult, ID: c.ID, Req: c.Req, Result: result, Error: errText})
+	ev := EvSubResult
+	if c.Op == OpVote {
+		ev = EvVoteResult
+	}
+	h.Emit(Event{Event: ev, ID: c.ID, Req: c.Req, Result: result, Error: errText, Vote: vote})
 	if result == ResultNotSignedIn && (h.signedIn || !h.known) {
 		h.known, h.signedIn, h.name = true, false, ""
 		h.emitSession()
@@ -234,7 +238,7 @@ func (h *Helper) ScriptMessage(s string) {
 		}
 	case MsgResult:
 		if h.cur != nil && h.cur.ID == m.ID {
-			h.finish(m.Result, m.Error)
+			h.finish(m.Result, m.Error, m.Vote)
 		}
 	}
 }
@@ -259,7 +263,11 @@ func (h *Helper) page(m ScriptMsg) {
 		h.emitSession()
 	}
 	if h.sign == signNone && h.cur != nil && m.ItemID == h.cur.ID {
-		h.eng.Eval(SubscribeScript(h.cur.ID, h.cur.Unsubscribe, h.cur.Deps, h.PostJS))
+		if h.cur.Op == OpVote {
+			h.eng.Eval(VoteScript(h.cur.ID, h.cur.Vote, h.PostJS))
+		} else {
+			h.eng.Eval(SubscribeScript(h.cur.ID, h.cur.Unsubscribe, h.cur.Deps, h.PostJS))
+		}
 	}
 	h.next()
 }
