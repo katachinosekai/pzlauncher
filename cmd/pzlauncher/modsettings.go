@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"fyne.io/fyne/v2"
@@ -15,6 +14,7 @@ import (
 	"fyne.io/fyne/v2/widget"
 
 	"github.com/katachinosekai/pzlauncher/internal/install"
+	"github.com/katachinosekai/pzlauncher/internal/kvfile"
 	"github.com/katachinosekai/pzlauncher/internal/packs"
 	"github.com/katachinosekai/pzlauncher/internal/paths"
 )
@@ -61,38 +61,6 @@ func (u *ui) modSettingsDialog(modID, modName string) {
 	d.Show()
 }
 
-type kvLine struct {
-	raw     string
-	key     string
-	val     string
-	section string
-	entry   *widget.Entry
-}
-
-func parseKV(text string) ([]*kvLine, int) {
-	var out []*kvLine
-	section := ""
-	n := 0
-	for _, l := range strings.Split(text, "\n") {
-		t := strings.TrimSpace(strings.TrimSuffix(l, "\r"))
-		kl := &kvLine{raw: l, section: section}
-		switch {
-		case strings.HasPrefix(t, "[") && strings.HasSuffix(t, "]"):
-			section = strings.TrimSpace(t[1 : len(t)-1])
-			kl.section = section
-		case t == "" || strings.HasPrefix(t, "#") || strings.HasPrefix(t, ";") || strings.HasPrefix(t, "--"):
-		default:
-			if i := strings.Index(l, "="); i > 0 {
-				kl.key = strings.TrimSpace(l[:i])
-				kl.val = strings.TrimSpace(strings.TrimSuffix(l[i+1:], "\r"))
-				n++
-			}
-		}
-		out = append(out, kl)
-	}
-	return out, n
-}
-
 func (u *ui) editSettingsFile(p, modName string) {
 	if install.GameRunning() {
 		dialog.ShowInformation("Game is running", "Quit Project Zomboid first: the mod would overwrite your changes when it saves its settings.", u.win)
@@ -113,7 +81,8 @@ func (u *ui) editSettingsFile(p, modName string) {
 		return
 	}
 	text := string(b)
-	lines, n := parseKV(text)
+	lines, n := kvfile.Parse(text)
+	entries := map[*kvfile.Line]*widget.Entry{}
 	var content fyne.CanvasObject
 	var collect func() string
 	if n == 0 {
@@ -127,28 +96,30 @@ func (u *ui) editSettingsFile(p, modName string) {
 		box := container.NewVBox()
 		lastSection := "\x00"
 		for _, l := range lines {
-			if l.key == "" {
+			if l.Key == "" {
 				continue
 			}
-			if l.section != lastSection {
-				lastSection = l.section
-				if l.section != "" {
-					h := widget.NewLabel(l.section)
+			if l.Section != lastSection {
+				lastSection = l.Section
+				if l.Section != "" {
+					h := widget.NewLabel(l.Section)
 					h.TextStyle = fyne.TextStyle{Bold: true}
 					box.Add(h)
 				}
 			}
-			l.entry = widget.NewEntry()
-			l.entry.SetText(l.val)
-			box.Add(container.NewGridWithColumns(2, widget.NewLabel(l.key), l.entry))
+			e := widget.NewEntry()
+			e.SetText(l.Val)
+			entries[l] = e
+			box.Add(container.NewGridWithColumns(2, widget.NewLabel(l.Key), e))
 		}
 		content = box
 		collect = func() string {
-			return applyKV(lines, func(l *kvLine) (string, bool) {
-				if l.entry == nil {
+			return kvfile.Apply(lines, func(l *kvfile.Line) (string, bool) {
+				e := entries[l]
+				if e == nil {
 					return "", false
 				}
-				return l.entry.Text, l.entry.Text != l.val
+				return e.Text, e.Text != l.Val
 			})
 		}
 	}
@@ -178,27 +149,4 @@ func (u *ui) editSettingsFile(p, modName string) {
 		}
 		dialog.ShowInformation("Saved", fmt.Sprintf("Saved %s.\nThe old version is kept as %s.", filepath.Base(p), filepath.Base(bak)), u.win)
 	}, u.win)
-}
-
-func applyKV(lines []*kvLine, newVal func(*kvLine) (string, bool)) string {
-	out := make([]string, 0, len(lines))
-	for _, l := range lines {
-		v, changed := "", false
-		if l.key != "" {
-			v, changed = newVal(l)
-		}
-		if !changed {
-			out = append(out, l.raw)
-			continue
-		}
-		i := strings.Index(l.raw, "=")
-		rest := l.raw[i+1:]
-		lead := rest[:len(rest)-len(strings.TrimLeft(rest, " \t"))]
-		cr := ""
-		if strings.HasSuffix(l.raw, "\r") {
-			cr = "\r"
-		}
-		out = append(out, l.raw[:i+1]+lead+v+cr)
-	}
-	return strings.Join(out, "\n")
 }

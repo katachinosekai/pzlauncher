@@ -6,6 +6,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/katachinosekai/pzlauncher/internal/modoptions"
 )
 
 type ModRef struct {
@@ -27,7 +29,6 @@ func (s Setting) Shareable() bool { return s.Blocked == "" }
 
 var gameFiles = map[string]string{
 	"keysb42.ini":             "Game: key bindings",
-	"modoptions.ini":          "Mod Options (settings of many mods)",
 	"pz_modlist_settings.cfg": "Game: saved mod lists (presets)",
 }
 
@@ -170,7 +171,7 @@ func DetectSettings(luaDir string, mods []ModRef) []Setting {
 	var out []Setting
 	for _, e := range ents {
 		name := e.Name()
-		if e.Type()&os.ModeSymlink != 0 {
+		if e.Type()&os.ModeSymlink != 0 || name == modoptions.FileName {
 			continue
 		}
 		s := Setting{Rel: name, Dir: e.IsDir()}

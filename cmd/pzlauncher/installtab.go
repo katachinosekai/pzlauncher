@@ -15,6 +15,8 @@ import (
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
+	"github.com/katachinosekai/pzlauncher/internal/diag"
+	"github.com/katachinosekai/pzlauncher/internal/modoptions"
 	"github.com/katachinosekai/pzlauncher/internal/packs"
 	"github.com/katachinosekai/pzlauncher/internal/paths"
 	"github.com/katachinosekai/pzlauncher/internal/play"
@@ -204,6 +206,20 @@ func (u *ui) installTab() fyne.CanvasObject {
 				fail(err)
 				return
 			}
+			if !dry {
+				fyne.Do(func() { status.SetText("Checking what the pack would change...") })
+				changes, err := previewInstall(u.ctx, dir)
+				if err != nil {
+					fail(err)
+					return
+				}
+				answer := make(chan bool, 1)
+				fyne.Do(func() { u.confirmPackChanges(changes, func(ok bool) { answer <- ok }) })
+				if !<-answer {
+					fyne.Do(func() { status.SetText("Cancelled: nothing was changed.") })
+					return
+				}
+			}
 			fyne.Do(func() { status.SetText("Installing...") })
 			summary, err := runInstall(u.ctx, dir, dry, logf)
 			if err != nil {
@@ -236,7 +252,7 @@ func (u *ui) installTab() fyne.CanvasObject {
 			go run()
 		}
 		if fromGitHub && !dry {
-			dialog.ShowConfirm("Install a pack from GitHub?", "This pack comes from "+src.String()+".\n\nA pack replaces your controls and mod settings (yours are backed up first), can add world presets, can pre-approve Java mods in ZombieBuddy (you're asked first) and can switch ZBBatch on. Only install packs from people you trust.", func(ok bool) {
+			dialog.ShowConfirm("Install a pack from GitHub?", "This pack comes from "+src.String()+".\n\nA pack changes the settings it carries (you see every change before anything is written, and your files are backed up first), can add world presets, can pre-approve Java mods in ZombieBuddy (you're asked first) and can switch ZBBatch on. Only install packs from people you trust.", func(ok bool) {
 				if ok {
 					start()
 				}
@@ -290,6 +306,35 @@ func (u *ui) makePackDialog() {
 		luaRels = append(luaRels, s.Rel)
 		luaBox.Add(c)
 	}
+	var moChecks []*widget.Check
+	var moGroups []string
+	moBox := container.NewVBox()
+	if b, err := os.ReadFile(filepath.Join(z, "Lua", modoptions.FileName)); err == nil {
+		enabled := map[string]bool{}
+		if t, err := os.ReadFile(filepath.Join(z, "mods", "default.txt")); err == nil {
+			for _, id := range diag.EnabledMods(string(t)) {
+				enabled[strings.ToLower(id)] = true
+			}
+		}
+		for _, g := range modoptions.Parse(string(b)).Groups() {
+			label := fmt.Sprintf("%s  ·  %d option(s)", g.Mod, g.Options)
+			if g.KeyBinds > 0 {
+				label += fmt.Sprintf(", %d key binding(s) left out", g.KeyBinds)
+			}
+			c := widget.NewCheck(label, nil)
+			if g.Options == 0 {
+				c.Disable()
+			} else {
+				c.SetChecked(enabled[strings.ToLower(g.Mod)])
+			}
+			moChecks = append(moChecks, c)
+			moGroups = append(moGroups, g.Mod)
+			moBox.Add(c)
+		}
+	}
+	if len(moChecks) == 0 {
+		moBox.Add(widget.NewLabel("No Mod Options saved yet (they appear after you change a mod's options in the game)."))
+	}
 	modList := widget.NewCheck("Mod list (mods/default.txt)", nil)
 	modList.SetChecked(true)
 	var presetChecks []*widget.Check
@@ -323,6 +368,7 @@ func (u *ui) makePackDialog() {
 	body := container.NewVBox(
 		container.NewBorder(nil, nil, widget.NewLabel("Pack name"), nil, name),
 		head("Mod settings (owner detected automatically)"), luaBox,
+		head("Mod Options (the game's Options > Mods screen; ticked = mods in your mod list; key bindings stay personal)"), moBox,
 		head("Game"), modList,
 		head("World presets"), presetBox,
 		head("ZBBatch"), zbb,
@@ -337,6 +383,11 @@ func (u *ui) makePackDialog() {
 		for i, c := range luaChecks {
 			if c.Checked {
 				o.Lua = append(o.Lua, luaRels[i])
+			}
+		}
+		for i, c := range moChecks {
+			if c.Checked && !c.Disabled() {
+				o.ModOptions = append(o.ModOptions, moGroups[i])
 			}
 		}
 		for i, c := range presetChecks {

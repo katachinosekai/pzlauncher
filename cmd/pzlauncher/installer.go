@@ -19,6 +19,26 @@ type InstallFunc func(ctx context.Context, packDir string, dryRun bool, log func
 
 var runInstall InstallFunc = realInstall
 
+var previewInstall = func(ctx context.Context, packDir string) ([]string, error) {
+	r, err := install.Run(ctx, install.Options{PackDir: packDir, DryRun: true, ConfirmApprovals: confirmApprovals})
+	return r.Changes, err
+}
+
+func (u *ui) confirmPackChanges(changes []string, done func(bool)) {
+	if len(changes) == 0 {
+		done(true)
+		return
+	}
+	text := strings.Join(changes, "\n")
+	l := widget.NewLabel(text)
+	l.Wrapping = fyne.TextWrapWord
+	sc := container.NewVScroll(l)
+	sc.SetMinSize(fyne.NewSize(680, 380))
+	intro := widget.NewLabel(fmt.Sprintf("Installing this pack makes %d change(s). Settings files are changed value by value; your other settings stay as they are, and every file is backed up first.", len(changes)))
+	intro.Wrapping = fyne.TextWrapWord
+	dialog.ShowCustomConfirm("Install this pack?", "Install", "Cancel", container.NewBorder(intro, nil, nil, nil, sc), done, u.win)
+}
+
 func realInstall(ctx context.Context, packDir string, dryRun bool, log func(string)) (string, error) {
 	r, err := install.Run(ctx, install.Options{
 		PackDir:          packDir,

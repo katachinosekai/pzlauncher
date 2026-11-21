@@ -285,29 +285,45 @@ func (in *Installer) Settings(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	copied, same := 0, 0
+	copied, merged, same := 0, 0, 0
 	for _, rel := range files {
 		dst := filepath.Join(in.zdir, rel)
+		slash := filepath.ToSlash(rel)
 		if isFile(dst) && (sameFile(filepath.Join(src, rel), dst) || in.sameAfterModList(filepath.Join(src, rel), dst, rel)) {
 			same++
 			continue
 		}
 		if isFile(dst) {
+			if out, changes, ok := mergeSettings(slash, filepath.Join(src, rel), dst); ok {
+				if len(changes) == 0 {
+					same++
+					continue
+				}
+				if err := in.backupFile(rel, in.zdir, "Zomboid"); err != nil {
+					return err
+				}
+				if err := in.writeFile(dst, out); err != nil {
+					return err
+				}
+				for _, c := range changes {
+					in.change("  " + slash + ": " + c.String())
+				}
+				merged++
+				continue
+			}
 			if err := in.backupFile(rel, in.zdir, "Zomboid"); err != nil {
 				return err
 			}
+			in.change("  " + slash + ": whole file replaced (yours is backed up)")
+		} else {
+			in.change("  " + slash + ": added")
 		}
 		if err := in.copyFile(filepath.Join(src, rel), dst); err != nil {
 			return err
 		}
 		copied++
 	}
-	msg := fmt.Sprintf("  %d file(s) copied, %d already up to date", copied, same)
-	if copied > 0 {
-		in.change(msg)
-	} else {
-		in.say(msg)
-	}
+	in.say(fmt.Sprintf("  %d file(s) merged setting by setting, %d copied, %d already up to date", merged, copied, same))
 	in.say("")
 	return nil
 }
