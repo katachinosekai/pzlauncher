@@ -37,7 +37,7 @@ The mods installed through the pack come from the Steam Workshop and belong to t
 
 ## Launcher
 
-Made by **katachinosekai**.`
+Made by **katachinosekai**. Licence: GNU GPL 3.0 or later (releases up to v0.1.10: MIT).`
 
 func (u *ui) showAbout() {
 	text := widget.NewRichTextFromMarkdown(creditsText + "\n\nVersion: " + version)

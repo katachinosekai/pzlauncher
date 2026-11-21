@@ -75,4 +75,4 @@ Project Zomboid is made by The Indie Stone. ZombieBuddy is by zed-0xff. Mods bel
 
 ## License
 
-MIT. Third-party Go modules keep their own licences (MIT, BSD, ISC, Apache 2.0, public domain); the full texts are in [THIRD_PARTY_LICENSES.txt](cmd/pzlauncher/THIRD_PARTY_LICENSES.txt) and under About & credits > Third-party licences.
+GNU GPL 3.0 or later (see [LICENSE](LICENSE) and [NOTICE](NOTICE)); releases up to v0.1.10 were published under MIT. Third-party Go modules keep their own licences (MIT, BSD, ISC, Apache 2.0, public domain); the full texts are in [THIRD_PARTY_LICENSES.txt](cmd/pzlauncher/THIRD_PARTY_LICENSES.txt) and under About & credits > Third-party licences.
