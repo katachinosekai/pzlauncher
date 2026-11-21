@@ -1,9 +1,13 @@
 package main
 
 import (
+	"context"
 	"testing"
 
+	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/test"
+
+	"github.com/katachinosekai/pzlauncher/internal/workshop"
 
 	"github.com/katachinosekai/pzlauncher/internal/webview"
 )
@@ -19,7 +23,7 @@ func TestVoteState(t *testing.T) {
 		{"signed out", false, false, false, "", "", false, false, false, "Sign in to Steam to vote."},
 		{"no browser", true, true, false, "up", "", false, false, false, "Voting needs the built-in browser, which could not start."},
 		{"reading", true, false, true, "", "", false, false, false, "Checking your vote on Steam..."},
-		{"not voted", true, false, false, "none", "", false, false, true, "You have not voted on this mod yet."},
+		{"not voted", true, false, false, "none", "", false, false, true, "You have not voted on this yet."},
 		{"voted up", true, false, false, "up", "", true, false, true, "You voted thumbs up."},
 		{"voted down", true, false, false, "down", "", false, true, true, "You voted thumbs down."},
 		{"sending", true, false, true, "up", "", true, false, false, "Sending your vote to Steam..."},
@@ -132,5 +136,66 @@ func TestSessionVoteRouting(t *testing.T) {
 	s.vote("9", webview.VoteUp, func(e webview.Event) { now = append(now, e) })
 	if len(now) != 1 || now[0].Result != webview.ResultNotSignedIn || s.signingIn {
 		t.Fatalf("%+v signingIn=%v", now, s.signingIn)
+	}
+}
+
+// TestVoteBarOnEveryKindOfRow expands a subscribed mod (My subscriptions /
+// Recently Updated), a search result (Popular, magnifier search) and a
+// collection (Search for Collection) in one list and checks each shows the
+// vote bar. Built synchronously: signed out, no browser helper started.
+func TestVoteBarOnEveryKindOfRow(t *testing.T) {
+	test.NewTempApp(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	w := test.NewWindow(nil)
+	defer w.Close()
+	u := &ui{win: w, ctx: ctx}
+	deps := fakeWorkshopDeps()
+	b := &wsBrowser{u: u, deps: deps, busy: map[string]bool{}, subState: map[string]bool{}, status: newAutoLabel()}
+	b.thumbs = newThumbCache(deps.thumb)
+	b.sess = newWSSession(b)
+	sub := subItems([]workshop.Sub{{ID: "101", State: workshop.SubInstalled}}, map[string]workshop.Details{"101": {ID: "101", Title: "Subscribed Mod"}}, nil, true)[0]
+	d := workshop.Details{ID: "102", Title: "Search Result", Subscriptions: 5, Stars: 4}
+	search := wsItem{ID: d.ID, Title: d.Title, Cols: searchCols(d, false)}
+	c := workshop.Details{ID: "103", Title: "A Collection", Children: 12}
+	coll := wsItem{ID: c.ID, Title: c.Title, Cols: searchCols(c, true), Collection: true}
+	items := []wsItem{sub, search, coll}
+	list := b.itemList(&items, nil)
+	w.SetContent(list)
+	w.Resize(fyne.NewSize(900, 900))
+	rowFor := func(title string) *wsRow {
+		var found *wsRow
+		var walk func(o fyne.CanvasObject)
+		walk = func(o fyne.CanvasObject) {
+			if r, ok := o.(*wsRow); ok && r.title.Text == title {
+				found = r
+				return
+			}
+			switch v := o.(type) {
+			case *fyne.Container:
+				for _, k := range v.Objects {
+					walk(k)
+				}
+			case fyne.Widget:
+				for _, k := range test.WidgetRenderer(v).Objects() {
+					walk(k)
+				}
+			}
+		}
+		walk(list)
+		return found
+	}
+	for _, it := range items {
+		r := rowFor(it.Title)
+		if r == nil {
+			t.Fatalf("%s: row not shown", it.Title)
+		}
+		test.Tap(r.toggle)
+		if r = rowFor(it.Title); r == nil || !r.detBox.Visible() {
+			t.Fatalf("%s: row did not expand", it.Title)
+		}
+		if !r.vote.box.Visible() || r.vote.note.Text != "Sign in to Steam to vote." || !r.vote.up.Disabled() || !r.vote.down.Disabled() {
+			t.Errorf("%s: vote bar visible=%v note=%q", it.Title, r.vote.box.Visible(), r.vote.note.Text)
+		}
 	}
 }

@@ -99,7 +99,6 @@ type wsItem struct {
 	Installed  bool
 	Preview    string
 	Collection bool
-	CanVote    bool     // subscribed mod: thumbs up / down in the expanded row
 	Cols       []string // search tabs: column values (see wsColsLayout)
 	subs       int64
 	stars      int
@@ -734,14 +733,11 @@ func (b *wsBrowser) itemList(items *[]wsItem, nearEnd func()) *widget.List {
 			if open {
 				r.toggle.SetIcon(theme.MenuDropUpIcon())
 				r.details.SetText(wsDetailsText(it, b.active))
-				if it.CanVote {
-					id, title := it.ID, it.displayTitle()
-					r.vote.show(b.voteFor(id),
-						func() { b.castVote(id, webview.VoteUp, title) },
-						func() { b.castVote(id, webview.VoteDown, title) })
-				} else {
-					r.vote.box.Hide()
-				}
+				// thumbs up / down on every tab (mods and collections)
+				id, title := it.ID, it.displayTitle()
+				r.vote.show(b.voteFor(id),
+					func() { b.castVote(id, webview.VoteUp, title) },
+					func() { b.castVote(id, webview.VoteDown, title) })
 				r.detBox.Show()
 			} else {
 				r.toggle.SetIcon(theme.MenuDropDownIcon())
@@ -1270,7 +1266,7 @@ func subItems(subs []workshop.Sub, det map[string]workshop.Details, local map[st
 		if desc == "" {
 			desc = l.Description
 		}
-		items = append(items, wsItem{ID: s.ID, Title: title, Info: info, Detail: strings.Join(detail, "  ·  "), Tags: d.Tags, ModIDs: l.ModIDs, Requires: l.Requires, Desc: desc, State: subStateLabel(s.State), Subscribed: true, Installed: s.State == workshop.SubInstalled, Preview: preview, sub: s.State, CanVote: true})
+		items = append(items, wsItem{ID: s.ID, Title: title, Info: info, Detail: strings.Join(detail, "  ·  "), Tags: d.Tags, ModIDs: l.ModIDs, Requires: l.Requires, Desc: desc, State: subStateLabel(s.State), Subscribed: true, Installed: s.State == workshop.SubInstalled, Preview: preview, sub: s.State})
 		if !updated.IsZero() {
 			items[len(items)-1].updated = updated.Unix()
 		}

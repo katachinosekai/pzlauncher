@@ -8,7 +8,7 @@ import (
 	"github.com/katachinosekai/pzlauncher/internal/webview"
 )
 
-// Steam Workshop thumbs up / down for subscribed mods. The vote is read from
+// Steam Workshop thumbs up / down on every Workshop tab. The vote is read from
 // and sent through the signed-in hidden browser (Steam's own vote buttons on
 // the mod page). Steam has no "remove vote": the vote already given stays
 // highlighted and clicking it again does nothing.
@@ -42,7 +42,7 @@ func voteState(signedIn, fallback, busy bool, vote, errText string) voteUI {
 	case vote == webview.VoteDown:
 		ui.note = "You voted thumbs down."
 	case vote == webview.VoteNone:
-		ui.note = "You have not voted on this mod yet."
+		ui.note = "You have not voted on this yet."
 	}
 	return ui
 }
