@@ -21,6 +21,7 @@ import (
 	"fyne.io/fyne/v2/widget"
 
 	"github.com/katachinosekai/pzlauncher/internal/install"
+	"github.com/katachinosekai/pzlauncher/internal/modlist"
 	"github.com/katachinosekai/pzlauncher/internal/paths"
 	"github.com/katachinosekai/pzlauncher/internal/webview"
 	"github.com/katachinosekai/pzlauncher/internal/workshop"
@@ -41,6 +42,7 @@ type wsDeps struct {
 	thumb    func(ctx context.Context, u string) ([]byte, error)
 	local    func(itemDir string) workshop.LocalItem
 	uploads  func() map[string]string
+	active   func() map[string]bool
 	external func(u string) error
 }
 
@@ -60,6 +62,21 @@ var workshopDeps = wsDeps{
 		}
 		return workshop.UploadPreviews(z)
 	},
+	active: func() map[string]bool {
+		z, err := paths.Zomboid()
+		if err != nil {
+			return nil
+		}
+		f, err := (&modlist.Store{ZomboidDir: z}).LoadDefault()
+		if err != nil {
+			return nil
+		}
+		on := map[string]bool{}
+		for _, id := range f.Mods {
+			on[id] = true
+		}
+		return on
+	},
 	check: func(ctx context.Context, cid string) (*workshop.Result, error) {
 		return workshop.Check(ctx, workshop.Options{CollectionID: cid})
 	},
@@ -71,6 +88,10 @@ type wsItem struct {
 	Title      string
 	Info       string
 	Desc       string
+	Detail     string
+	Tags       []string
+	ModIDs     []string
+	Requires   []string
 	State      string
 	Subscribed bool
 	Installed  bool
@@ -104,6 +125,7 @@ type wsBrowser struct {
 	busy     map[string]bool
 	subState map[string]bool
 	watchers []func()
+	active   map[string]bool
 	fixes    map[*widget.List]func()
 }
 
@@ -266,7 +288,7 @@ type wsRow struct {
 	content fyne.CanvasObject
 }
 
-const wsDetailsH = 120
+const wsDetailsH = 170
 
 func newWSRow() *wsRow {
 	r := &wsRow{
@@ -349,13 +371,46 @@ func (b *wsBrowser) showMenu(it wsItem, e *fyne.PointEvent) {
 	widget.ShowPopUpMenuAtPosition(menu, b.u.win.Canvas(), e.AbsolutePosition)
 }
 
-func wsDetailsText(it wsItem) string {
-	var parts []string
-	if it.State != "" {
-		parts = append(parts, it.State)
+func wsDetailsText(it wsItem, active map[string]bool) string {
+	var facts []string
+	if it.Detail != "" {
+		facts = append(facts, it.Detail)
 	}
-	if it.Info != "" {
-		parts = append(parts, it.Info)
+	if len(it.Tags) > 0 {
+		facts = append(facts, "Tags: "+strings.Join(it.Tags, "  ·  "))
+	}
+	if len(it.ModIDs) > 0 {
+		facts = append(facts, "Mod IDs: "+strings.Join(it.ModIDs, ", "))
+	}
+	if len(it.Requires) > 0 {
+		req := make([]string, len(it.Requires))
+		for i, r := range it.Requires {
+			req[i] = strings.TrimLeft(r, "\\")
+		}
+		facts = append(facts, "Requires: "+strings.Join(req, ", "))
+	}
+	if len(it.ModIDs) > 0 && active != nil {
+		if len(it.ModIDs) == 1 {
+			state := "no"
+			if active[it.ModIDs[0]] {
+				state = "yes"
+			}
+			facts = append(facts, "Enabled in mod list: "+state)
+		} else {
+			var on []string
+			for _, id := range it.ModIDs {
+				state := " (off)"
+				if active[id] {
+					state = " (on)"
+				}
+				on = append(on, id+state)
+			}
+			facts = append(facts, "Enabled in mod list: "+strings.Join(on, ", "))
+		}
+	}
+	var parts []string
+	if len(facts) > 0 {
+		parts = append(parts, strings.Join(facts, "\n"))
 	}
 	if it.Desc != "" {
 		parts = append(parts, it.Desc)
@@ -419,7 +474,7 @@ func (b *wsBrowser) itemList(items *[]wsItem, nearEnd func()) *widget.List {
 			}
 			if open {
 				r.toggle.SetIcon(theme.MenuDropUpIcon())
-				r.details.SetText(wsDetailsText(it))
+				r.details.SetText(wsDetailsText(it, b.active))
 				r.detBox.Show()
 			} else {
 				r.toggle.SetIcon(theme.MenuDropDownIcon())
@@ -443,7 +498,9 @@ func (b *wsBrowser) itemList(items *[]wsItem, nearEnd func()) *widget.List {
 				r.btn.Importance = widget.MediumImportance
 				r.btn.Disable()
 			case sub:
-				r.btn.Hide()
+				r.btn.SetText("Subscribed")
+				r.btn.Importance = widget.MediumImportance
+				r.btn.Enable()
 			default:
 				r.btn.SetText("Subscribe")
 				r.btn.Importance = widget.HighImportance
@@ -509,19 +566,57 @@ func detailsInfo(d workshop.Details) string {
 	if d.Collection && d.Children > 0 {
 		parts = append(parts, fmt.Sprintf("%d items", d.Children))
 	}
+	if !d.Updated.IsZero() {
+		parts = append(parts, updatedAgo(d.Updated, time.Now()))
+	}
+	return strings.Join(parts, "  ·  ")
+}
+
+func popularity(d workshop.Details) []string {
+	var parts []string
 	if d.Subscriptions > 0 {
 		parts = append(parts, humanCount(d.Subscriptions)+" subscribers")
 	}
 	if d.Stars > 0 {
 		parts = append(parts, fmt.Sprintf("rating %d/5", d.Stars))
 	}
-	if d.Size > 0 {
-		parts = append(parts, humanSize(d.Size))
+	return parts
+}
+
+func sizeAndDate(size int64, updated time.Time) []string {
+	var parts []string
+	if size > 0 {
+		parts = append(parts, humanSize(size))
 	}
-	if !d.Updated.IsZero() {
-		parts = append(parts, "updated "+d.Updated.Format("2006-01-02"))
+	if !updated.IsZero() {
+		parts = append(parts, "updated "+updated.Format("2006-01-02"))
 	}
-	return strings.Join(parts, "  ·  ")
+	return parts
+}
+
+func detailsDetail(d workshop.Details) string {
+	return strings.Join(append(popularity(d), sizeAndDate(d.Size, d.Updated)...), "  ·  ")
+}
+
+func updatedAgo(t, now time.Time) string {
+	days := int(now.Sub(t).Hours() / 24)
+	switch {
+	case days < 1:
+		return "Today"
+	case days < 7:
+		return "This week"
+	case days < 30:
+		return "This month"
+	case days < 365:
+		if n := days / 30; n > 1 {
+			return fmt.Sprintf("%d months ago", n)
+		}
+		return "1 month ago"
+	}
+	if n := days / 365; n > 1 {
+		return fmt.Sprintf("%d years ago", n)
+	}
+	return "1 year ago"
 }
 
 func (b *wsBrowser) browseView(controls fyne.CanvasObject, query func() workshop.BrowseQuery) (fyne.CanvasObject, func()) {
@@ -581,7 +676,7 @@ func (b *wsBrowser) browseViewSorted(controls fyne.CanvasObject, query func() wo
 					list.ScrollToTop()
 				}
 				for _, d := range r.Items {
-					items = append(items, wsItem{ID: d.ID, Title: d.Title, Info: detailsInfo(d), Desc: d.Description, Preview: d.Preview, Collection: d.Collection || q.Collections, subs: d.Subscriptions, stars: d.Stars, size: d.Size, updated: d.Updated.Unix(), seq: len(items)})
+					items = append(items, wsItem{ID: d.ID, Title: d.Title, Info: detailsInfo(d), Detail: detailsDetail(d), Tags: d.Tags, Desc: d.Description, Preview: d.Preview, Collection: d.Collection || q.Collections, subs: d.Subscriptions, stars: d.Stars, size: d.Size, updated: d.Updated.Unix(), seq: len(items)})
 				}
 				hasMore = r.TotalPages > page && len(r.Items) > 0
 				if order != nil {
@@ -703,19 +798,21 @@ func subItems(subs []workshop.Sub, det map[string]workshop.Details, local map[st
 		d := det[s.ID]
 		l := local[s.ID]
 		_, public := det[s.ID]
-		info := detailsInfo(d)
+		updated, size := d.Updated, d.Size
 		if !public {
-			var parts []string
-			if s.Size > 0 {
-				parts = append(parts, humanSize(s.Size))
-			}
+			size = s.Size
+			updated = time.Time{}
 			if s.Updated > 0 {
-				parts = append(parts, "updated "+time.Unix(s.Updated, 0).Format("2006-01-02"))
+				updated = time.Unix(s.Updated, 0)
 			}
-			if detailsOK {
-				parts = append(parts, "private or hidden on the Workshop")
-			}
-			info = strings.Join(parts, "  ·  ")
+		}
+		var info string
+		if !updated.IsZero() {
+			info = updatedAgo(updated, time.Now())
+		}
+		detail := append(popularity(d), sizeAndDate(size, updated)...)
+		if !public && detailsOK {
+			detail = append(detail, "private or hidden on the Workshop")
 		}
 		title := d.Title
 		if title == "" {
@@ -729,7 +826,7 @@ func subItems(subs []workshop.Sub, det map[string]workshop.Details, local map[st
 		if desc == "" {
 			desc = l.Description
 		}
-		items = append(items, wsItem{ID: s.ID, Title: title, Info: info, Desc: desc, State: subStateLabel(s.State), Subscribed: true, Installed: s.State == workshop.SubInstalled, Preview: preview, sub: s.State})
+		items = append(items, wsItem{ID: s.ID, Title: title, Info: info, Detail: strings.Join(detail, "  ·  "), Tags: d.Tags, ModIDs: l.ModIDs, Requires: l.Requires, Desc: desc, State: subStateLabel(s.State), Subscribed: true, Installed: s.State == workshop.SubInstalled, Preview: preview, sub: s.State})
 	}
 	sort.SliceStable(items, func(i, j int) bool {
 		a, b := items[i], items[j]
@@ -770,15 +867,18 @@ func (b *wsBrowser) subsTab() (fyne.CanvasObject, func()) {
 				uploads = b.deps.uploads()
 			}
 			for _, s := range subs {
-				if d := det[s.ID]; d.Title == "" || d.Preview == "" {
-					l := b.deps.local(s.Dir)
-					if l.Image == "" {
-						l.Image = uploads[s.ID]
-					}
-					local[s.ID] = l
+				l := b.deps.local(s.Dir)
+				if l.Image == "" {
+					l.Image = uploads[s.ID]
 				}
+				local[s.ID] = l
+			}
+			var active map[string]bool
+			if b.deps.active != nil {
+				active = b.deps.active()
 			}
 			fyne.Do(func() {
+				b.active = active
 				refresh.Enable()
 				if err != nil {
 					summary.SetText("Could not read Steam's Workshop file (appworkshop_108600.acf): " + err.Error())
@@ -910,7 +1010,7 @@ func (b *wsBrowser) collectionView(fixed string) (fyne.CanvasObject, func()) {
 			if err == nil {
 				det, derr = b.deps.details(b.u.ctx, r.IDs)
 				for _, id := range r.IDs {
-					if d := det[id]; (d.Title == "" || d.Preview == "") && r.ContentDir != "" {
+					if r.ContentDir != "" {
 						local[id] = b.deps.local(filepath.Join(r.ContentDir, id))
 					}
 				}
@@ -958,7 +1058,7 @@ func (b *wsBrowser) collectionView(fixed string) (fyne.CanvasObject, func()) {
 					case workshop.NotSubscribed:
 						label = "Not subscribed"
 					}
-					it := wsItem{ID: m.ID, Title: title(m.ID, m.Title), Info: detailsInfo(d), Desc: d.Description, State: label, Subscribed: subbed, Preview: preview(m.ID)}
+					it := wsItem{ID: m.ID, Title: title(m.ID, m.Title), Info: detailsInfo(d), Detail: detailsDetail(d), Tags: d.Tags, ModIDs: local[m.ID].ModIDs, Requires: local[m.ID].Requires, Desc: d.Description, State: label, Subscribed: subbed, Preview: preview(m.ID)}
 					missing = append(missing, it)
 				}
 				for _, id := range r.IDs {
@@ -966,7 +1066,7 @@ func (b *wsBrowser) collectionView(fixed string) (fyne.CanvasObject, func()) {
 						continue
 					}
 					d := det[id]
-					installed = append(installed, wsItem{ID: id, Title: title(id, ""), Info: detailsInfo(d), Desc: d.Description, State: "Installed", Subscribed: true, Installed: true, Preview: preview(id)})
+					installed = append(installed, wsItem{ID: id, Title: title(id, ""), Info: detailsInfo(d), Detail: detailsDetail(d), Tags: d.Tags, ModIDs: local[id].ModIDs, Requires: local[id].Requires, Desc: d.Description, State: "Installed", Subscribed: true, Installed: true, Preview: preview(id)})
 				}
 				items = append(append(items, missing...), installed...)
 				byPopular(items, det)

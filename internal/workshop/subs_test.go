@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -147,22 +149,25 @@ func TestReadLocalItem(t *testing.T) {
 	}
 	write("mods/Fences/42/mod.info", "name=Viewpoint - 3D Fences\nid=Fences\ndescription=3D   fences.\nposter=../common/poster.png\nicon=../common/icon.png\n")
 	write("mods/Fences/common/poster.png", "png")
-	write("mods/Alpha/common/mod.info", "id=Alpha\nposter=missing.png\n")
+	write("mods/Alpha/common/mod.info", "id=Alpha\nposter=missing.png\nrequire=\\tsarlib,Fences\n")
 	write("mods/NoInfo/readme.txt", "x")
 	got := ReadLocalItem(item)
 	want := LocalItem{Title: "Alpha, Viewpoint - 3D Fences", Image: filepath.Join(item, "mods/Fences/42/../common/poster.png"), Description: "3D fences."}
 	if got.Title != want.Title || filepath.Clean(got.Image) != filepath.Clean(want.Image) || got.Description != want.Description {
 		t.Fatalf("%+v", got)
 	}
+	if strings.Join(got.ModIDs, ",") != "Alpha,Fences" || len(got.Requires) == 0 {
+		t.Fatalf("ids/requires: %+v", got)
+	}
 	os.Remove(filepath.Join(item, "mods/Fences/common/poster.png"))
 	write("mods/Fences/common/icon.png", "png")
 	if got := ReadLocalItem(item); filepath.Base(got.Image) != "icon.png" {
 		t.Fatalf("icon fallback: %+v", got)
 	}
-	if got := ReadLocalItem(filepath.Join(item, "nope")); got != (LocalItem{}) {
+	if got := ReadLocalItem(filepath.Join(item, "nope")); !reflect.DeepEqual(got, LocalItem{}) {
 		t.Fatalf("%+v", got)
 	}
-	if got := ReadLocalItem(""); got != (LocalItem{}) {
+	if got := ReadLocalItem(""); !reflect.DeepEqual(got, LocalItem{}) {
 		t.Fatalf("%+v", got)
 	}
 }

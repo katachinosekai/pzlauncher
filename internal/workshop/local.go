@@ -3,6 +3,7 @@ package workshop
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -13,6 +14,8 @@ type LocalItem struct {
 	Title       string
 	Image       string
 	Description string
+	ModIDs      []string
+	Requires    []string
 }
 
 func ReadLocalItem(itemDir string) LocalItem {
@@ -38,6 +41,14 @@ func ReadLocalItem(itemDir string) LocalItem {
 			name = e.Name()
 		}
 		names = append(names, name)
+		if id := strings.TrimSpace(m.ID); id != "" && !slices.Contains(out.ModIDs, id) {
+			out.ModIDs = append(out.ModIDs, id)
+		}
+		for _, r := range m.Require {
+			if r = strings.TrimSpace(r); r != "" && !slices.Contains(out.Requires, r) {
+				out.Requires = append(out.Requires, r)
+			}
+		}
 		if out.Image == "" {
 			for _, p := range append(append([]string{}, m.Posters...), m.Icon) {
 				if st, err := os.Stat(p); p != "" && err == nil && st.Mode().IsRegular() {
@@ -51,6 +62,8 @@ func ReadLocalItem(itemDir string) LocalItem {
 		}
 	}
 	sort.Strings(names)
+	sort.Strings(out.ModIDs)
+	sort.Strings(out.Requires)
 	out.Title = strings.Join(names, ", ")
 	return out
 }

@@ -24,9 +24,11 @@ import (
 )
 
 func fakeWorkshopDeps() wsDeps {
-	day := time.Date(2026, 11, 10, 0, 0, 0, 0, time.UTC)
+	now := time.Now()
+	ages := map[string]int{"101": 95, "102": 3, "103": 0, "104": 20, "105": 800}
+	tags := map[string][]string{"101": {"Build 42", "Interface", "Multiplayer"}, "102": {"Build 41", "Build 42", "Realistic"}, "103": {"Build 42", "Audio"}, "104": {"Build 41", "Weapons"}, "105": {"Build 42", "Vehicles"}}
 	mk := func(id, title string, subs int64) workshop.Details {
-		return workshop.Details{ID: id, Title: title, Preview: "https://images.steamusercontent.com/ugc/" + id + "/", Description: "A fixture mod description for " + title + ".", Updated: day, Size: subs * 1000, Subscriptions: subs, Stars: 4, Found: true}
+		return workshop.Details{ID: id, Title: title, Preview: "https://images.steamusercontent.com/ugc/" + id + "/", Description: "A fixture mod description for " + title + ".", Updated: now.AddDate(0, 0, -ages[id]), Size: subs * 1000, Subscriptions: subs, Stars: 4, Tags: tags[id], Found: true}
 	}
 	all := map[string]workshop.Details{}
 	for _, d := range []workshop.Details{mk("101", "Better Sorting", 512000), mk("102", "Common Sense", 1200000), mk("103", "True Music", 88000), mk("104", "Brita's Weapon Pack", 340000), mk("105", "Autotsar Trailers", 95000)} {
@@ -42,11 +44,16 @@ func fakeWorkshopDeps() wsDeps {
 		},
 		details: func(ctx context.Context, ids []string) (map[string]workshop.Details, error) { return all, nil },
 		subs: func() ([]workshop.Sub, error) {
-			return []workshop.Sub{{ID: "103", State: workshop.SubDownloading}, {ID: "104", State: workshop.SubNeedsUpdate}, {ID: "101", State: workshop.SubInstalled}, {ID: "102", State: workshop.SubInstalled}, {ID: "900", State: workshop.SubInstalled, Size: 3 << 20, Dir: "fixture/900"}}, nil
+			return []workshop.Sub{{ID: "103", State: workshop.SubDownloading}, {ID: "104", State: workshop.SubNeedsUpdate}, {ID: "101", State: workshop.SubInstalled, Dir: "fixture/101"}, {ID: "102", State: workshop.SubInstalled, Dir: "fixture/102"}, {ID: "900", State: workshop.SubInstalled, Size: 3 << 20, Updated: now.AddDate(-1, -2, 0).Unix(), Dir: "fixture/900"}}, nil
 		},
 		local: func(dir string) workshop.LocalItem {
-			if dir == "fixture/900" {
-				return workshop.LocalItem{Title: "Aardvark Private Mod", Description: "Name read from the installed mod.info."}
+			switch dir {
+			case "fixture/900":
+				return workshop.LocalItem{Title: "Aardvark Private Mod", Description: "Name read from the installed mod.info.", ModIDs: []string{"AardvarkPrivate"}}
+			case "fixture/101":
+				return workshop.LocalItem{ModIDs: []string{"BetterSorting", "BetterSortingB42"}, Requires: []string{"\\tsarlib"}}
+			case "fixture/102":
+				return workshop.LocalItem{ModIDs: []string{"CommonSense"}}
 			}
 			return workshop.LocalItem{}
 		},
@@ -70,6 +77,7 @@ func fakeWorkshopDeps() wsDeps {
 			png.Encode(&buf, img)
 			return buf.b, nil
 		},
+		active:   func() map[string]bool { return map[string]bool{"BetterSorting": true, "CommonSense": true} },
 		external: func(string) error { return errors.New("test: no browser") },
 	}
 }
@@ -232,13 +240,13 @@ func TestSubItems(t *testing.T) {
 		t.Fatal(order)
 	}
 	mine := items[2]
-	if mine.displayTitle() != "Mine" || mine.Preview != "/x/poster.png" || !strings.Contains(mine.Info, "2.0 MB") || !strings.Contains(mine.Info, "private or hidden") || mine.Desc != "From mod.info." || strings.Contains(mine.Info, "From mod.info.") {
+	if mine.displayTitle() != "Mine" || mine.Preview != "/x/poster.png" || !strings.HasSuffix(mine.Info, " years ago") || !strings.Contains(mine.Detail, "2.0 MB") || !strings.Contains(mine.Detail, "private or hidden") || mine.Desc != "From mod.info." || strings.Contains(mine.Info, "From mod.info.") {
 		t.Fatalf("%+v", mine)
 	}
 	if items[4].displayTitle() != "Workshop item 4" || items[1].Preview != det["2"].Preview || !items[1].Installed || items[0].Installed {
 		t.Fatalf("%+v", items)
 	}
-	if it := subItems(subs, nil, local, false); strings.Contains(it[2].Info, "private") {
+	if it := subItems(subs, nil, local, false); strings.Contains(it[2].Detail, "private") {
 		t.Fatalf("no private note when the details call failed: %+v", it[2])
 	}
 }
@@ -294,5 +302,14 @@ func TestThumbCacheLocalAndFailures(t *testing.T) {
 	mu.Unlock()
 	if n != 1 {
 		t.Fatalf("failed thumbnail fetched %d times, want 1 until the retry delay", n)
+	}
+}
+
+func TestUpdatedAgo(t *testing.T) {
+	now := time.Date(2026, 11, 21, 12, 0, 0, 0, time.UTC)
+	for days, want := range map[int]string{0: "Today", 1: "This week", 6: "This week", 7: "This month", 29: "This month", 30: "1 month ago", 59: "1 month ago", 60: "2 months ago", 364: "12 months ago", 365: "1 year ago", 729: "1 year ago", 800: "2 years ago"} {
+		if got := updatedAgo(now.AddDate(0, 0, -days), now); got != want {
+			t.Errorf("%d days: got %q want %q", days, got, want)
+		}
 	}
 }
