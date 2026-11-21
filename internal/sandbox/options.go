@@ -65,12 +65,18 @@ func ParseOptions(text string) []Option {
 }
 
 func (o Option) Group() string {
-	g, _, _ := strings.Cut(o.Name, ".")
+	g, _, ok := strings.Cut(o.Name, ".")
+	if !ok {
+		return ""
+	}
 	return g
 }
 
 func (o Option) Key() string {
-	_, k, _ := strings.Cut(o.Name, ".")
+	_, k, ok := strings.Cut(o.Name, ".")
+	if !ok {
+		return o.Name
+	}
 	return k
 }
 

@@ -35,6 +35,9 @@ option Sample.Note
 
 option Other.Flag
 {type = boolean, default = false, page = Other,}
+
+option Plain_Setting
+{type = integer, min = -1, max = 100, default = -1, page = Plain,}
 `
 
 const sandboxTxt = `Sandbox_EN = {
@@ -50,7 +53,7 @@ const sandboxJSON = `{"Sandbox_Sample_Mode": "Mode", "Sandbox_Sample_ModeValues_
 
 func TestParseAndTranslate(t *testing.T) {
 	opts := ParseOptions(optsTxt)
-	if len(opts) != 6 {
+	if len(opts) != 7 || opts[6].Group() != "" || opts[6].Key() != "Plain_Setting" {
 		t.Fatalf("%d options: %+v", len(opts), opts)
 	}
 	c := opts[1]
@@ -111,16 +114,20 @@ func TestPresetRoundTrip(t *testing.T) {
 	if v, _ := f.Value("Sample.Note"); v != "a=b" {
 		t.Fatal(v)
 	}
-	if _, ok := f.Value("Zombies"); ok {
-		t.Fatal("vanilla keys are not mod options")
-	}
-	out, err := f.Render(map[string]string{"Sample.Count": "7", "Sample.Mode": "3"}, optMap())
+	out, err := f.Render(map[string]string{"Sample.Count": "7", "Sample.Mode": "3", "Plain_Setting": "5"}, optMap())
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "Version=6\r\n# Zombies\r\nZombies=4\r\n\r\n# Sample\r\nSample.Enabled=true\r\n\r\nSample.Count=7\r\nSample.Note=a=b\r\n\r\nSample.Mode=3\r\n"
+	want := "Version=6\r\n# Zombies\r\nZombies=4\r\n\r\n# Sample\r\nSample.Enabled=true\r\n\r\nSample.Count=7\r\nSample.Note=a=b\r\n\r\nSample.Mode=3\r\n\r\nPlain_Setting=5\r\n"
 	if out != want {
 		t.Fatalf("got %q", out)
+	}
+	g := parseFile(Target{Kind: Preset}, out)
+	if v, ok := g.Value("Plain_Setting"); !ok || v != "5" {
+		t.Fatal("dotless option not read back", v)
+	}
+	if again, _ := g.Render(map[string]string{"Plain_Setting": "6"}, optMap()); strings.Count(again, "Plain_Setting=") != 1 {
+		t.Fatalf("dotless option duplicated: %q", again)
 	}
 	if _, err := f.Render(map[string]string{"Sample.Count": "99"}, optMap()); err == nil {
 		t.Fatal("out of range accepted")
@@ -148,7 +155,7 @@ func TestServerRoundTrip(t *testing.T) {
 	if v, _ := f.Value("Map.AllowMiniMap"); v != "true" {
 		t.Fatal(v)
 	}
-	out, err := f.Render(map[string]string{"Sample.Enabled": "false", "Sample.Note": `x "y"`, "Sample.Count": "5", "Other.Flag": "true"}, optMap())
+	out, err := f.Render(map[string]string{"Sample.Enabled": "false", "Sample.Note": `x "y"`, "Sample.Count": "5", "Other.Flag": "true", "Plain_Setting": "7"}, optMap())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -167,6 +174,7 @@ func TestServerRoundTrip(t *testing.T) {
     Other = {
         Flag = true,
     },
+    Plain_Setting = 7,
 }
 `
 	if out != want {
@@ -175,6 +183,12 @@ func TestServerRoundTrip(t *testing.T) {
 	g := parseFile(Target{Kind: Server}, out)
 	if v, _ := g.Value("Other.Flag"); v != "true" {
 		t.Fatal("new group not readable")
+	}
+	if v, _ := g.Value("Plain_Setting"); v != "7" {
+		t.Fatal("dotless option not readable", v)
+	}
+	if v, _ := g.Value("Zombies"); v != "4" {
+		t.Fatal("top-level value not read", v)
 	}
 }
 

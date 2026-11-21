@@ -28,6 +28,7 @@ type sandboxTab struct {
 	targets []sandbox.Target
 	file    *sandbox.File
 	edits   map[string]string
+	invalid map[string]string
 	sel     int
 	list    *widget.List
 	form    *fyne.Container
@@ -38,7 +39,7 @@ type sandboxTab struct {
 }
 
 func (u *ui) sandboxOptionsTab() fyne.CanvasObject {
-	t := &sandboxTab{u: u, sel: -1, edits: map[string]string{}}
+	t := &sandboxTab{u: u, sel: -1, edits: map[string]string{}, invalid: map[string]string{}}
 	t.root = container.NewStack(container.NewCenter(widget.NewLabel("Reading mod sandbox options...")))
 	go t.load()
 	return t.root
@@ -102,6 +103,7 @@ func (t *sandboxTab) build() {
 	t.saveBtn.Disable()
 	discard := widget.NewButton("Discard changes", func() {
 		t.edits = map[string]string{}
+		t.invalid = map[string]string{}
 		t.changed()
 		t.showMod()
 	})
@@ -169,6 +171,7 @@ func (t *sandboxTab) openTarget(tg sandbox.Target) {
 		return
 	}
 	t.file = f
+	t.invalid = map[string]string{}
 	t.changed()
 	if t.sel < 0 {
 		t.list.Select(0)
@@ -222,6 +225,14 @@ func (t *sandboxTab) changed() {
 	switch n := len(t.edits); {
 	case t.file == nil:
 		t.saveBtn.Disable()
+	case len(t.invalid) > 0:
+		var bad []string
+		for _, l := range t.invalid {
+			bad = append(bad, l)
+		}
+		sort.Strings(bad)
+		t.status.SetText("Fix before saving (out of range or not a valid value): " + strings.Join(bad, ", "))
+		t.saveBtn.Disable()
 	case n == 0:
 		t.status.SetText(t.file.Path)
 		t.saveBtn.Disable()
@@ -236,6 +247,10 @@ func (t *sandboxTab) showMod() {
 		return
 	}
 	mo := t.mods[t.sel]
+	if len(t.invalid) > 0 {
+		t.invalid = map[string]string{}
+		t.changed()
+	}
 	var rows []fyne.CanvasObject
 	head := widget.NewLabelWithStyle(mo.ModName, fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
 	rows = append(rows, head)
@@ -302,8 +317,13 @@ func (t *sandboxTab) optionRow(mo sandbox.ModOptions, o sandbox.Option) fyne.Can
 		}
 		e.OnChanged = func(s string) {
 			if o.Valid(s) {
+				delete(t.invalid, o.Name)
 				t.set(o, s)
+				return
 			}
+			delete(t.edits, o.Name)
+			t.invalid[o.Name] = mo.Text.Label(o)
+			t.changed()
 		}
 		setUI = func(v string) { e.SetText(v) }
 		control = e

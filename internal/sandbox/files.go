@@ -49,7 +49,7 @@ func Targets(zomboidDir string) []Target {
 }
 
 var (
-	reCfgLine  = regexp.MustCompile(`^([A-Za-z0-9_]+\.[A-Za-z0-9_.]+)=(.*)$`)
+	reCfgLine  = regexp.MustCompile(`^([A-Za-z0-9_][A-Za-z0-9_.]*)=(.*)$`)
 	reLuaOpen  = regexp.MustCompile(`^\s*([A-Za-z0-9_]+)\s*=\s*\{\s*$`)
 	reLuaValue = regexp.MustCompile(`^(\s*)([A-Za-z0-9_]+)\s*=\s*(.*?)\s*,?\s*$`)
 )
@@ -105,11 +105,14 @@ func parseFile(t Target, s string) *File {
 			}
 			continue
 		}
-		if len(stack) != 2 || strings.HasPrefix(tr, "--") {
+		if len(stack) < 1 || len(stack) > 2 || strings.HasPrefix(tr, "--") {
 			continue
 		}
 		if m := reLuaValue.FindStringSubmatch(l); m != nil {
-			name := stack[1] + "." + m[2]
+			name := m[2]
+			if len(stack) == 2 {
+				name = stack[1] + "." + m[2]
+			}
 			f.values[name] = luaValue(m[3])
 			f.where[name] = i
 		}
@@ -179,6 +182,13 @@ func (f *File) Render(changes map[string]string, opts map[string]Option) (string
 		}
 		if f.Kind == Preset {
 			inserts = append(inserts, ins{len(lines), []string{"", n + "=" + val}})
+			continue
+		}
+		if o.Group() == "" {
+			if f.end < 0 {
+				return "", fmt.Errorf("%s: no closing } found", f.Path)
+			}
+			inserts = append(inserts, ins{f.end, []string{"    " + o.Key() + " = " + val + ","}})
 			continue
 		}
 		line := "        " + o.Key() + " = " + val + ","
