@@ -334,6 +334,57 @@ func TestBuildLabel(t *testing.T) {
 	}
 }
 
+func TestTitleInfoLayout(t *testing.T) {
+	test.NewTempApp(t)
+	r := newWSRow()
+	r.title.SetText("A very long Workshop item title that will not fit in a narrow row at all")
+	r.info.SetText("B41/B42  ·  12k subscribers  ·  ★ 4/5  ·  This week")
+	want := r.text.Layout.(*titleInfoLayout).infoWant()
+	for _, w := range []float32{900, want + wsTitleMinW + 1, want + wsTitleMinW - 40, 260, 200} {
+		r.text.Resize(fyne.NewSize(w, 40))
+		title, info := r.text.Objects[0].Size().Width, r.text.Objects[1].Size().Width
+		if w-want >= wsTitleMinW {
+			if info != want {
+				t.Errorf("width %v: info got %v, want its full %v", w, info, want)
+			}
+		} else if info >= want {
+			t.Errorf("width %v: info %v should be cut to keep the title minimum", w, info)
+		}
+		// below title minimum + the info side's own minimum nothing can keep both
+		if w >= wsTitleMinW+r.text.Objects[1].MinSize().Width+theme.Padding() && title < wsTitleMinW-theme.Padding()-0.5 {
+			t.Errorf("width %v: title %v below the %v minimum", w, title, wsTitleMinW)
+		}
+		if title+info > w+0.5 {
+			t.Errorf("width %v: title %v + info %v overflow", w, title, info)
+		}
+	}
+
+	// with setInfo, tight rows switch to "subs" before anything is cut
+	l := r.text.Layout.(*titleInfoLayout)
+	full := "B41/B42  ·  12k subscribers  ·  ★ 4/5  ·  This week"
+	l.setInfo(full)
+	fullW, shortW := l.want(full), l.want(compactInfo(full))
+	if shortW >= fullW {
+		t.Fatalf("compact text not shorter: %v >= %v", shortW, fullW)
+	}
+	for _, c := range []struct {
+		w    float32
+		text string
+	}{
+		{fullW + wsTitleMinW + 10, full},
+		{shortW + wsTitleMinW + 2, compactInfo(full)},
+		{fullW + wsTitleMinW + 10, full}, // widening again restores the full text
+	} {
+		r.text.Resize(fyne.NewSize(c.w, 40))
+		if r.info.Text != c.text {
+			t.Errorf("width %v: info text %q, want %q", c.w, r.info.Text, c.text)
+		}
+		if got := r.text.Objects[1].Size().Width; got != l.want(c.text) {
+			t.Errorf("width %v: info width %v, want %v (not cut)", c.w, got, l.want(c.text))
+		}
+	}
+}
+
 func TestSearchInfo(t *testing.T) {
 	d := workshop.Details{Tags: []string{"Build 41", "Build 42"}, Subscriptions: 12345, Stars: 4, Updated: time.Now()}
 	if got, want := searchInfo(d), "B41/B42  ·  12k subscribers  ·  ★ 4/5  ·  Today"; got != want {

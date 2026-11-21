@@ -287,8 +287,69 @@ type wsRow struct {
 	details *widget.Label
 	detBox  fyne.CanvasObject
 	body    *fyne.Container
+	text    *fyne.Container
 	preview string
 	content fyne.CanvasObject
+}
+
+// wsTitleMinW is the narrowest the title gets before the info line is cut.
+const wsTitleMinW = 120
+
+// compactInfo is the info line for tight rows ("12k subscribers" -> "12k subs").
+func compactInfo(s string) string { return strings.Replace(s, " subscribers", " subs", 1) }
+
+// titleInfoLayout lays out [title | info+dot]: the info side gets the width its
+// text needs, the title the rest (shortened with "…" first). When the full
+// info and minTitle don't both fit it switches to the compact info text; only
+// after that, and with the title at minTitle, is the info line itself cut.
+type titleInfoLayout struct {
+	info        *widget.Label
+	extra       fyne.CanvasObject // the status dot, to the right of the info text
+	minTitle    float32
+	full, short string
+}
+
+// setInfo sets the info text; Layout picks the full or compact form.
+func (l *titleInfoLayout) setInfo(s string) {
+	l.full, l.short = s, compactInfo(s)
+	l.info.Text = s
+}
+
+func (l *titleInfoLayout) want(text string) float32 {
+	// text + the label's inner padding on both sides + 1px against rounding
+	// (one pixel short and the label already cuts "Today" to "To…")
+	w := fyne.MeasureText(text, theme.TextSize(), l.info.TextStyle).Width + 2*theme.InnerPadding() + 1
+	if l.extra != nil {
+		w += l.extra.MinSize().Width + theme.Padding() // the Border gap before the dot
+	}
+	return w
+}
+
+func (l *titleInfoLayout) infoWant() float32 { return l.want(l.info.Text) }
+
+func (l *titleInfoLayout) Layout(objs []fyne.CanvasObject, size fyne.Size) {
+	if l.full != "" {
+		text := l.full
+		if l.want(text) > size.Width-l.minTitle {
+			text = l.short
+		}
+		if l.info.Text != text {
+			l.info.Text = text
+			l.info.Refresh()
+		}
+	}
+	iw := min(l.infoWant(), max(size.Width-l.minTitle, objs[1].MinSize().Width))
+	iw = min(iw, size.Width)
+	tw := max(size.Width-iw-theme.Padding(), 0)
+	objs[0].Move(fyne.NewPos(0, 0))
+	objs[0].Resize(fyne.NewSize(tw, size.Height))
+	objs[1].Move(fyne.NewPos(size.Width-iw, 0))
+	objs[1].Resize(fyne.NewSize(iw, size.Height))
+}
+
+func (l *titleInfoLayout) MinSize(objs []fyne.CanvasObject) fyne.Size {
+	a, b := objs[0].MinSize(), objs[1].MinSize()
+	return fyne.NewSize(a.Width+b.Width+theme.Padding(), max(a.Height, b.Height))
 }
 
 const wsDetailsH = 170
@@ -318,12 +379,12 @@ func newWSRow() *wsRow {
 	r.info.Alignment = fyne.TextAlignTrailing
 	r.info.Importance = widget.LowImportance
 	dotBox := container.New(layout.NewCustomPaddedLayout(0, 0, 6, 8), container.NewCenter(container.NewGridWrap(fyne.NewSize(12, 12), r.dot)))
-	text := container.NewGridWithColumns(2,
+	r.text = container.New(&titleInfoLayout{info: r.info, extra: dotBox, minTitle: wsTitleMinW},
 		container.NewVBox(layout.NewSpacer(), r.title, layout.NewSpacer()),
 		container.NewBorder(nil, nil, nil, dotBox, container.NewVBox(layout.NewSpacer(), r.info, layout.NewSpacer())),
 	)
 	right := container.NewCenter(container.NewHBox(r.btn, r.ext, r.toggle))
-	inner := container.New(layout.NewCustomPaddedLayout(4, 4, 4, 4), container.NewBorder(nil, nil, container.NewStack(thumbBg, r.img), right, text))
+	inner := container.New(layout.NewCustomPaddedLayout(4, 4, 4, 4), container.NewBorder(nil, nil, container.NewStack(thumbBg, r.img), right, r.text))
 	r.card = newTapCard(container.NewStack(bg, inner))
 	detScroll := container.NewVScroll(r.details)
 	detScroll.SetMinSize(fyne.NewSize(0, wsDetailsH))
@@ -464,7 +525,8 @@ func (b *wsBrowser) itemList(items *[]wsItem, nearEnd func()) *widget.List {
 			if it.State != "" {
 				info = strings.ToUpper(it.State) + "  ·  " + info
 			}
-			r.info.SetText(info)
+			r.text.Layout.(*titleInfoLayout).setInfo(info)
+			r.text.Refresh() // re-split title/info for the new text width (refreshes the label)
 			busy := b.busy[it.ID]
 			sub := b.subscribed(it)
 			r.dot.FillColor = wsDotColor(busy, sub, it.Installed)
